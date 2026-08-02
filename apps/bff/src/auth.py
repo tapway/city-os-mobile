@@ -6,9 +6,6 @@ in memory.
 """
 import logging
 import os
-from typing import Optional
-
-import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 

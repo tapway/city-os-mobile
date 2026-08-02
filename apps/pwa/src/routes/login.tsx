@@ -1,18 +1,18 @@
 import { useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@city-os/ui';
-import { initFromCallbackFragment, loginRedirect, getAccessToken } from '../lib/auth';
+import { initFromCallbackFragment, getAccessToken, loginRedirect } from '../lib/auth';
 
 export function LoginPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Check for OAuth callback fragment first
     if (initFromCallbackFragment()) {
       navigate({ to: '/tickets' });
+      return;
     }
-  }, [navigate]);
-
-  useEffect(() => {
+    // If already has a token, redirect
     if (getAccessToken()) {
       navigate({ to: '/tickets' });
     }

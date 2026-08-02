@@ -16,21 +16,29 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  const token = getAccessToken();
+function buildHeaders(init: RequestInit, token: string | null): Headers {
   const headers = new Headers(init.headers);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  headers.set('Content-Type', 'application/json');
+  // Only set Content-Type for requests with a body (POST/PATCH/PUT)
+  if (init.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  return headers;
+}
+
+export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const token = getAccessToken();
+  const headers = buildHeaders(init, token);
 
   const resp = await fetch(input, { ...init, headers, credentials: 'include' });
 
   if (resp.status === 401) {
     const newToken = await refreshAccessToken();
     if (newToken) {
-      headers.set('Authorization', `Bearer ${newToken}`);
-      return fetch(input, { ...init, headers, credentials: 'include' });
+      const retryHeaders = buildHeaders(init, newToken);
+      return fetch(input, { ...init, headers: retryHeaders, credentials: 'include' });
     }
     throw new ApiError(401, 'Session expired — please log in again');
   }
@@ -45,5 +53,13 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
 
 export async function apiJson<T = unknown>(input: string, init?: RequestInit): Promise<T> {
   const resp = await apiFetch(input, init);
+  // Handle 204 No Content or empty body
+  if (resp.status === 204 || resp.headers.get('content-length') === '0') {
+    return null as T;
+  }
+  const contentType = resp.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    return null as T;
+  }
   return resp.json() as Promise<T>;
 }

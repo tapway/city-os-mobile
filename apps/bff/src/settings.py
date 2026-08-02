@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     city_help_api_url: str = "http://localhost:8001"
 
     # BFF
-    cookie_domain: str = "localhost"
+    cookie_domain: str = ""  # Empty = use request hostname
     cookie_secure: bool = False
     access_token_ttl_minutes: int = 5
     refresh_token_ttl_hours: int = 12
