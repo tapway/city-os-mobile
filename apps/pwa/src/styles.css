@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+/* Native-feel globals — spec §9 */
+body {
+  overscroll-behavior: none;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+}
+
+* {
+  touch-action: manipulation;
+}
+
+.app-bottom-nav {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+.app-header {
+  padding-top: env(safe-area-inset-top);
+}
+
+@media (hover: hover) {
+  .btn:hover { opacity: 0.9; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+::view-transition-old(root), ::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
