@@ -8,10 +8,11 @@ import { LoginPage } from './routes/login';
 import { TicketsPage } from './routes/tickets';
 import { TicketDetailPage } from './routes/ticket.$id';
 import { AttendancePage } from './routes/attendance';
+import { CreateTicketPage } from './routes/create-ticket';
 import './styles.css';
 
-// Start MSW in dev mode to mock API responses
-if (import.meta.env.DEV) {
+// Start MSW in dev mode only when VITE_USE_MOCKS is set
+if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
   const { worker } = await import('./mocks/browser');
   await worker.start({ onUnhandledRequest: 'bypass' });
 }
@@ -63,12 +64,19 @@ const attendanceRoute = createRoute({
   component: AttendancePage,
 });
 
+const createTicketRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/create-ticket',
+  component: CreateTicketPage,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   indexRoute,
   ticketsRoute,
   ticketDetailRoute,
   attendanceRoute,
+  createTicketRoute,
 ]);
 
 const router = createRouter({ routeTree });

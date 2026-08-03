@@ -4,20 +4,20 @@ import { forwardRef } from 'react';
 import { cn } from './utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex items-center justify-center gap-2 rounded-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-40',
   {
     variants: {
       variant: {
-        primary: 'bg-blue-600 text-white hover:bg-blue-700',
-        secondary: 'bg-gray-200 text-gray-900 hover:bg-gray-300',
-        outline: 'border border-gray-300 bg-transparent hover:bg-gray-100',
-        ghost: 'bg-transparent hover:bg-gray-100',
-        danger: 'bg-red-600 text-white hover:bg-red-700',
+        primary: 'bg-[var(--cyan)] text-[var(--bg-deep)] hover:opacity-90 font-bold shadow-[0_0_12px_var(--cyan-glow)]',
+        secondary: 'bg-[var(--glass)] text-[var(--ink)] hover:opacity-80 border border-[var(--border)]',
+        outline: 'border border-[var(--border)] bg-transparent hover:bg-[var(--glass-weak)] text-[var(--ink)]',
+        ghost: 'bg-transparent hover:bg-[var(--glass-weak)] text-[var(--ink-dim)]',
+        danger: 'bg-transparent text-[var(--danger)] border border-[rgba(239,68,68,0.4)] hover:bg-[rgba(239,68,68,0.1)]',
       },
       size: {
-        sm: 'h-9 px-3 text-sm',
-        md: 'h-11 px-4 text-base',
-        lg: 'h-14 px-6 text-lg',
+        sm: 'h-9 px-3 text-xs tracking-wider uppercase font-mono',
+        md: 'h-11 px-4 text-sm tracking-wider uppercase font-mono',
+        lg: 'h-14 px-6 text-base tracking-wider uppercase font-mono',
         icon: 'h-11 w-11',
       },
     },
