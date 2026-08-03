@@ -3,14 +3,14 @@ import { forwardRef, type HTMLAttributes } from 'react';
 import { cn } from './utils';
 
 const badgeVariants = cva(
-  'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
+  'inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-mono uppercase tracking-wider',
   {
     variants: {
       variant: {
-        default: 'bg-gray-100 text-gray-800',
-        success: 'bg-green-100 text-green-800',
-        warning: 'bg-yellow-100 text-yellow-800',
-        danger: 'bg-red-100 text-red-800',
+        default: 'bg-[var(--glass-strong)] text-[var(--ink-dim)] border border-[var(--border)]',
+        success: 'bg-[rgba(16,185,129,0.15)] text-[var(--safe)] border border-[rgba(16,185,129,0.3)]',
+        warning: 'bg-[rgba(234,179,8,0.15)] text-[var(--warn)] border border-[rgba(234,179,8,0.3)]',
+        danger: 'bg-[rgba(239,68,68,0.15)] text-[var(--danger)] border border-[rgba(239,68,68,0.3)]',
       },
     },
     defaultVariants: { variant: 'default' },

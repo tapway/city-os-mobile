@@ -7,24 +7,29 @@ export function LoginPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Check for OAuth callback fragment first
     if (initFromCallbackFragment()) {
       navigate({ to: '/tickets' });
       return;
     }
-    // If already has a token, redirect
     if (getAccessToken()) {
       navigate({ to: '/tickets' });
     }
   }, [navigate]);
 
   return (
-    <div className="flex h-screen flex-col items-center justify-center bg-gray-900 px-6">
-      <h1 className="mb-2 text-center text-3xl font-bold text-white">City OS Operations</h1>
-      <p className="mb-8 text-center text-gray-400">Sign in to access your field operations</p>
-      <Button onClick={() => loginRedirect()} size="lg" className="w-full max-w-xs">
-        Sign in with City Guard
-      </Button>
+    <div className="app-shell" style={{ alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+      <div className="glass-panel" style={{ width: '100%', maxWidth: 320, padding: '32px 24px', textAlign: 'center' }}>
+        <div className="hud-title" style={{ fontSize: 18, marginBottom: 8 }}>CITY HELP</div>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 10, color: 'var(--ink-dim)', marginBottom: 24, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+          Field Operations App
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 24, lineHeight: 1.5 }}>
+          Sign in to access your tickets, attendance, and field operations
+        </p>
+        <Button onClick={() => loginRedirect()} size="lg" className="w-full">
+          Sign in with City Guard
+        </Button>
+      </div>
     </div>
   );
 }

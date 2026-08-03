@@ -2,7 +2,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { Clock, MapPin } from 'lucide-react';
-import { Button, Card, Badge } from '@city-os/ui';
+import { Button, Badge } from '@city-os/ui';
 import { apiJson } from '../lib/api';
 import { getAccessToken } from '../lib/auth';
 import { useGeolocation } from '../hooks/useGeolocation';
@@ -64,18 +64,22 @@ export function AttendancePage() {
   const isClockedOut = !!todayQuery.data?.clock_out;
 
   return (
-    <div className="p-4">
-      <h1 className="mb-4 text-xl font-bold text-gray-900">Attendance</h1>
+    <div className="app-content" style={{ padding: '16px' }}>
+      <div className="app-header" style={{ padding: '12px 16px', marginBottom: 16, marginTop: -16, marginLeft: -16, marginRight: -16 }}>
+        <div className="hud-title">Attendance</div>
+      </div>
 
-      <Card className="mb-4 p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <MapPin size={16} className="text-blue-600" />
-          <span className="text-sm">
-            {geo.lat
-              ? `GPS: ${geo.lat.toFixed(6)}, ${geo.lng?.toFixed(6)}`
-              : 'No GPS position'}
-          </span>
+      {/* GPS Card */}
+      <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <MapPin size={16} style={{ color: 'var(--cyan)' }} />
+          <span className="hud-label">GPS Position</span>
         </div>
+        <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 8 }}>
+          {geo.lat
+            ? `GPS: ${geo.lat.toFixed(6)}, ${geo.lng?.toFixed(6)}`
+            : 'No GPS position'}
+        </p>
         <Button
           onClick={() => geo.getPosition()}
           variant="outline"
@@ -84,19 +88,20 @@ export function AttendancePage() {
         >
           {geo.loading ? 'Getting GPS...' : 'Get GPS Position'}
         </Button>
-        {geo.error && <p className="mt-1 text-xs text-red-500">{geo.error}</p>}
-      </Card>
+        {geo.error && <p style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>{geo.error}</p>}
+      </div>
 
-      <Card className="p-4">
-        <div className="mb-4 flex items-center justify-between">
-          <span className="font-medium text-gray-900">Today's Shift</span>
+      {/* Shift Card */}
+      <div className="glass-panel" style={{ padding: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <span className="hud-label">Today's Shift</span>
           <Badge
             variant={
               isClockedOut
                 ? 'default'
                 : isClockedIn
                   ? 'success'
-                  : 'warning'
+                  : 'warning' as any
             }
           >
             {isClockedOut
@@ -110,13 +115,15 @@ export function AttendancePage() {
         </div>
 
         {todayQuery.isLoading && (
-          <div className="h-10 animate-pulse rounded bg-gray-200" />
+          <div className="glass-panel" style={{ padding: 12, opacity: 0.3, height: 32 }} />
         )}
 
         {todayQuery.data && !todayQuery.isLoading && (
-          <div className="mb-4 space-y-1 text-sm text-gray-600">
+          <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--ink-dim)' }}>
             {todayQuery.data.clock_in && (
-              <p>Clock in: {new Date(todayQuery.data.clock_in).toLocaleTimeString()}</p>
+              <p style={{ marginBottom: 4 }}>
+                Clock in: {new Date(todayQuery.data.clock_in).toLocaleTimeString()}
+              </p>
             )}
             {todayQuery.data.clock_out && (
               <p>Clock out: {new Date(todayQuery.data.clock_out).toLocaleTimeString()}</p>
@@ -124,7 +131,7 @@ export function AttendancePage() {
           </div>
         )}
 
-        <div className="flex gap-2">
+        <div style={{ display: 'flex', gap: 8 }}>
           {!isClockedIn && !todayQuery.isLoading && (
             <Button
               onClick={() => clockInMutation.mutate()}
@@ -147,7 +154,7 @@ export function AttendancePage() {
             </Button>
           )}
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

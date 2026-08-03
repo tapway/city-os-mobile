@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { apiJson } from '../lib/api';
 import { getAccessToken } from '../lib/auth';
 import { useEffect } from 'react';
+import { Badge } from '@city-os/ui';
 
 interface TicketItem {
   id: number;
@@ -15,6 +16,15 @@ interface TicketItem {
   assigned_to: string | null;
   created_at: string | null;
 }
+
+const STATUS_CLASSES: Record<string, string> = {
+  OPEN: 'warning',
+  VERIFIED: 'default',
+  ASSIGNED: 'default',
+  IN_PROGRESS: 'warning',
+  RESOLVED: 'success',
+  CLOSED: 'default',
+};
 
 export function TicketsPage() {
   const navigate = useNavigate();
@@ -34,63 +44,65 @@ export function TicketsPage() {
     enabled: !!getAccessToken(),
   });
 
-  const statusColors: Record<string, string> = {
-    OPEN: 'bg-blue-100 text-blue-800',
-    VERIFIED: 'bg-purple-100 text-purple-800',
-    ASSIGNED: 'bg-yellow-100 text-yellow-800',
-    IN_PROGRESS: 'bg-orange-100 text-orange-800',
-    RESOLVED: 'bg-green-100 text-green-800',
-    CLOSED: 'bg-gray-100 text-gray-800',
-  };
-
   if (isLoading) {
     return (
-      <div className="space-y-2 p-4">
-        <h1 className="mb-4 text-xl font-bold text-gray-900">My Tickets</h1>
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-20 animate-pulse rounded-lg bg-gray-200" />
-        ))}
+      <div className="app-content" style={{ padding: '16px' }}>
+        <div className="app-header" style={{ padding: '12px 16px', marginBottom: 16 }}>
+          <div className="hud-title">My Tickets</div>
+        </div>
+        <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="glass-panel" style={{ padding: 16, height: 80, opacity: 0.3 }}>
+              <div style={{ fontSize: 12, color: 'var(--ink-dim)' }}>Loading...</div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex h-full items-center justify-center p-4">
-        <p className="text-red-500">Failed to load tickets. Pull down to retry.</p>
+      <div className="app-content" style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+        <p style={{ color: 'var(--danger)', fontSize: 13 }}>Failed to load tickets. Pull down to retry.</p>
       </div>
     );
   }
 
   return (
-    <div className="p-4">
-      <h1 className="mb-4 text-xl font-bold text-gray-900">My Tickets</h1>
+    <div className="app-content" style={{ padding: '16px' }}>
+      <div className="app-header" style={{ padding: '12px 16px', marginBottom: 16, marginTop: -16, marginLeft: -16, marginRight: -16 }}>
+        <div className="hud-title">My Tickets</div>
+        <div style={{ fontSize: 10, color: 'var(--ink-dim)', fontFamily: 'var(--font-label)', marginTop: 4 }}>
+          {data?.length || 0} assigned
+        </div>
+      </div>
+
       {!data || data.length === 0 ? (
-        <div className="flex h-40 items-center justify-center text-gray-500">
-          <p>No tickets assigned</p>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60%', gap: 12 }}>
+          <div style={{ fontSize: 36, opacity: 0.3 }}>📋</div>
+          <p style={{ color: 'var(--ink-dim)', fontSize: 13 }}>No tickets assigned</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {data.map((ticket) => (
             <div
               key={ticket.id}
-              className="cursor-pointer rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:bg-gray-50"
+              className="glass-panel"
+              style={{ padding: '14px', cursor: 'pointer' }}
               onClick={() => navigate({ to: `/tickets/${ticket.id}` })}
             >
-              <div className="mb-1 flex items-start justify-between">
-                <span className="font-medium text-gray-900">{ticket.title}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[ticket.status] || 'bg-gray-100 text-gray-800'}`}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 1, marginRight: 8 }}>
+                  {ticket.title}
+                </div>
+                <Badge variant={STATUS_CLASSES[ticket.status] as any || 'default'}>
                   {ticket.status}
-                </span>
+                </Badge>
               </div>
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <span>{ticket.ticket_uid}</span>
-                {ticket.location_desc && (
-                  <>
-                    <span>·</span>
-                    <span>{ticket.location_desc}</span>
-                  </>
-                )}
+              <div style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--ink-faint)' }}>
+                <span style={{ fontFamily: 'var(--font-label)', color: 'var(--cyan)' }}>{ticket.ticket_uid}</span>
+                {ticket.location_desc && <span>{ticket.location_desc}</span>}
               </div>
             </div>
           ))}
