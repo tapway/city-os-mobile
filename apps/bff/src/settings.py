@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Keycloak (public OIDC, PKCE)
-    keycloak_url: str = "http://localhost:8080/realms/city-os"
+    keycloak_url: str = "http://localhost:7080/realms/city-os"
     keycloak_client_id: str = "city-os-mobile"
     keycloak_client_secret: str = ""
     keycloak_redirect_uri: str = "http://localhost:5173/auth/callback"

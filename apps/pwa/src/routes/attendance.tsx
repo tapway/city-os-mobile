@@ -101,7 +101,7 @@ export function AttendancePage() {
                 ? 'default'
                 : isClockedIn
                   ? 'success'
-                  : 'warning' as any
+                  : 'warning'
             }
           >
             {isClockedOut

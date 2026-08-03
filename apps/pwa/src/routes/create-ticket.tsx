@@ -56,9 +56,10 @@ export function CreateTicketPage() {
         incident_type_code: incidentTypeCode || undefined,
         reporter_name: reporterName.trim() || undefined,
         reporter_contact: reporterContact.trim() || undefined,
+        image_urls: photo ? [photo] : undefined,
       };
 
-      const raw = await apiJson('/api/v1/events', {
+      const raw = await apiJson('/api/v1/tickets', {
         method: 'POST',
         body: JSON.stringify(body),
       });

@@ -17,7 +17,7 @@ interface TicketItem {
   created_at: string | null;
 }
 
-const STATUS_CLASSES: Record<string, string> = {
+const STATUS_CLASSES: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
   OPEN: 'warning',
   VERIFIED: 'default',
   ASSIGNED: 'default',
@@ -96,7 +96,7 @@ export function TicketsPage() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', flex: 1, marginRight: 8 }}>
                   {ticket.title}
                 </div>
-                <Badge variant={STATUS_CLASSES[ticket.status] as any || 'default'}>
+                <Badge variant={STATUS_CLASSES[ticket.status] || 'default'}>
                   {ticket.status}
                 </Badge>
               </div>
