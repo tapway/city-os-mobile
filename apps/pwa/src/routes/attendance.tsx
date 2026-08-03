@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { Clock, MapPin } from 'lucide-react';
@@ -17,7 +17,6 @@ interface TodayAttendance {
 
 export function AttendancePage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const geo = useGeolocation();
 
   useEffect(() => {

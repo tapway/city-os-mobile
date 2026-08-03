@@ -28,7 +28,8 @@ function getDB(): Promise<IDBPDatabase> {
 
 export async function enqueueMutation(m: Omit<QueuedMutation, 'id' | 'created_at'>): Promise<number> {
   const db = await getDB();
-  return db.add('mutation-queue', { ...m, created_at: Date.now() });
+  const key = await db.add('mutation-queue', { ...m, created_at: Date.now() });
+  return key as number;
 }
 
 export async function getQueue(): Promise<QueuedMutation[]> {
