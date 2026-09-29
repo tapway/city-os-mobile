@@ -6,12 +6,17 @@ import { Button, Badge } from '@city-os/ui';
 import {
   getTicket,
   getTimeline,
+  statusUpdateRequest,
   updateTicketStatus,
+  deleteImage,
   uploadImage,
   storageUrl,
+  type StatusUpdate,
   type TicketDetail,
 } from '../lib/help-api';
 import { getActor } from '../lib/auth';
+import { ApiError, isOfflineError } from '../lib/api';
+import { enqueueMutation } from '../lib/offline-queue';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
 
 const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
@@ -97,22 +102,51 @@ export function TicketDetailPage() {
       // Upload evidence first so a failed upload never leaves a half-written update.
       const uploaded = await Promise.all(images.map((i) => uploadImage(i.file, ticketUid)));
 
-      return updateTicketStatus(ticketUid, {
+      const request: StatusUpdate = {
         status,
         actor: getActor(),
         note: comment.trim() || undefined,
         lat: geo.lat,
         lng: geo.lng,
         image_urls: uploaded.map((u) => u.url),
-      });
+        // One key per logical update: a queued replay, or the officer pressing
+        // save again, carries the same key and the server applies it once.
+        client_request_id: crypto.randomUUID(),
+      };
+
+      try {
+        return await updateTicketStatus(ticketUid, request);
+      } catch (err) {
+        if (!isOfflineError(err)) {
+          // Evidence was uploaded before the update, so a rejected update leaves
+          // the objects orphaned. Only a 4xx is permanent — a 5xx may be retried,
+          // and the retry re-uploads anyway.
+          if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+            await Promise.all(
+              uploaded.map((u) => deleteImage(u.url).catch(() => undefined)),
+            );
+          }
+          throw err;
+        }
+        // Keep the officer's work. Evidence is already uploaded, so the queued
+        // entry references stored URLs — never a File, which cannot be
+        // re-serialised after the fact.
+        const { path, body } = statusUpdateRequest(ticketUid, request);
+        await enqueueMutation({ url: path, method: 'PATCH', body });
+        return null;
+      }
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       setComment('');
       images.forEach((i) => URL.revokeObjectURL(i.preview));
       setImages([]);
       setStatus('');
       setFormError('');
-      setNotice('Ticket updated with your GPS position.');
+      setNotice(
+        saved === null
+          ? 'No connection — update saved on this device and sent automatically.'
+          : 'Ticket updated with your GPS position.',
+      );
       queryClient.invalidateQueries({ queryKey: ['ticket', ticketUid] });
       queryClient.invalidateQueries({ queryKey: ['timeline', ticketUid] });
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
@@ -351,7 +385,7 @@ export function TicketDetailPage() {
             style={{
               width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
               borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-              fontFamily: 'var(--font-body)', marginBottom: 10, outline: 'none',
+              fontFamily: 'var(--font-body)', marginBottom: 10,
             }}
           >
             <option value="">— Select status —</option>
@@ -372,7 +406,7 @@ export function TicketDetailPage() {
             style={{
               width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
               borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-              fontFamily: 'var(--font-body)', resize: 'vertical', minHeight: 64, marginBottom: 10, outline: 'none',
+              fontFamily: 'var(--font-body)', resize: 'vertical', minHeight: 64, marginBottom: 10,
             }}
           />
 

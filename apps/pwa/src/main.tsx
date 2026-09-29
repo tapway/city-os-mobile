@@ -48,6 +48,14 @@ const queryClient = new QueryClient({
       retry: 1,
       refetchOnWindowFocus: false,
     },
+    mutations: {
+      // React Query's default ('online') *pauses* a mutation while the device
+      // reports no connection: the mutation function never runs, so the button
+      // sits on "Saving…" until the network returns and nothing is queued. The
+      // app keeps its own durable queue for exactly that case, which means the
+      // mutation has to run and be allowed to fail so it can hand over.
+      networkMode: 'always',
+    },
   },
 });
 

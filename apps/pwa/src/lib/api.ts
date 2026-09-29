@@ -65,6 +65,37 @@ export interface ApiFetchOptions extends RequestInit {
   noRetry?: boolean;
 }
 
+/**
+ * True when the failure is "the request never left the device".
+ *
+ * A queued update is only safe for this case: a 4xx is the server rejecting the
+ * content, and replaying it would fail forever.
+ */
+export function isOfflineError(err: unknown): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  // fetch rejects with a TypeError when the request never leaves the device —
+  // and apiFetch turns that into a status-0 ApiError, which has no HTTP status
+  // to inspect.
+  if (err instanceof ApiError) return err.status === 0;
+  return err instanceof TypeError;
+}
+
+/**
+ * `fetch` that turns a transport failure into an ApiError.
+ *
+ * A request that never left the device has no status code, and a bare
+ * `TypeError: Failed to fetch` tells an officer nothing. Status 0 keeps it
+ * distinguishable from a real HTTP failure — notably so the evidence cleanup
+ * does not fire for it.
+ */
+async function doFetch(input: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new ApiError(0, 'You appear to be offline — check your connection');
+  }
+}
+
 export async function apiFetch(
   input: string,
   init: ApiFetchOptions = {},
@@ -73,13 +104,13 @@ export async function apiFetch(
   const token = getAccessToken();
   const headers = buildHeaders(rest, token);
 
-  const resp = await fetch(input, { ...rest, headers, credentials: 'include' });
+  const resp = await doFetch(input, { ...rest, headers, credentials: 'include' });
 
   if (resp.status === 401 && !noRetry) {
     const newToken = await refreshAccessToken();
     if (newToken) {
       const retryHeaders = buildHeaders(rest, newToken);
-      const retried = await fetch(input, { ...rest, headers: retryHeaders, credentials: 'include' });
+      const retried = await doFetch(input, { ...rest, headers: retryHeaders, credentials: 'include' });
       if (retried.status !== 401) {
         if (!retried.ok) throw await toApiError(retried);
         return retried;

@@ -175,8 +175,14 @@ export function initFromCallbackFragment(): boolean {
 
 export function loginRedirect(): void {
   const returnTo = window.location.pathname + window.location.search;
-  const target = returnTo && returnTo !== '/login' ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
-  window.location.href = `/auth/login${target}`;
+  const params = new URLSearchParams();
+  if (returnTo && returnTo !== '/login') params.set('returnTo', returnTo);
+  // State the address the app is actually served from. The BFF cannot infer it:
+  // the request reaches it through a proxy that rewrites Host to the upstream,
+  // so only the browser knows. PWA_ORIGINS on the BFF decides whether to honour
+  // it — an unchecked value here would make ?origin= an open redirect.
+  params.set('origin', window.location.origin);
+  window.location.href = `/auth/login?${params.toString()}`;
 }
 
 /** Drop everything the service worker stored for this session.

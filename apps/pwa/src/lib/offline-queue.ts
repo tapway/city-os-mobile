@@ -26,9 +26,25 @@ function getDB(): Promise<IDBPDatabase> {
   return dbPromise;
 }
 
+/**
+ * Fired whenever the queue gains or loses an entry.
+ *
+ * The shell shows how many updates are waiting; without this it only learned
+ * that on mount, so an update queued mid-session stayed invisible and the
+ * officer could not tell whether their work had been kept.
+ */
+export const QUEUE_CHANGED_EVENT = 'city-os-mobile:queue-changed';
+
+function announceQueueChange(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(QUEUE_CHANGED_EVENT));
+  }
+}
+
 export async function enqueueMutation(m: Omit<QueuedMutation, 'id' | 'created_at'>): Promise<number> {
   const db = await getDB();
   const key = await db.add('mutation-queue', { ...m, created_at: Date.now() });
+  announceQueueChange();
   return key as number;
 }
 
@@ -42,11 +58,13 @@ export async function getQueue(): Promise<QueuedMutation[]> {
 export async function clearQueue(): Promise<void> {
   const db = await getDB();
   await db.clear('mutation-queue');
+  announceQueueChange();
 }
 
 export async function removeFromQueue(id: number): Promise<void> {
   const db = await getDB();
   await db.delete('mutation-queue', id);
+  announceQueueChange();
 }
 
 export interface SyncResult {

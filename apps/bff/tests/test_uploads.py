@@ -27,6 +27,11 @@ class FakeMinio:
     def put_object(self, bucket, key, data, length=None, content_type=None):
         self.objects[(bucket, key)] = data.read()
 
+    def remove_object(self, bucket, key):
+        if (bucket, key) not in self.objects:
+            raise FileNotFoundError(key)
+        del self.objects[(bucket, key)]
+
     def get_object(self, bucket, key):
         if (bucket, key) not in self.objects:
             raise FileNotFoundError(key)
@@ -55,6 +60,50 @@ def storage(monkeypatch):
 
     monkeypatch.setattr(uploads, "_verify_token", ok)
     return fake
+
+
+def test_delete_requires_a_bearer_token(storage):
+    """Deleting is a write: it must not be reachable unauthenticated."""
+    resp = client.delete(f"/api/uploads/{settings.uploads_prefix}/x/y.png")
+    assert resp.status_code == 401
+    assert "z" not in storage.objects
+
+
+def test_delete_refuses_objects_outside_the_uploads_prefix(storage):
+    """The prefix check is the guard against using this route to reach anything
+    else in the bucket (or, via a relative key, outside it)."""
+    for key in ("secrets/leak.txt", "city-help-important", "..."):
+        resp = client.delete(
+            f"/api/uploads/{key}", headers={"Authorization": "Bearer test-token"}
+        )
+        assert resp.status_code == 400, key
+
+
+def test_delete_removes_the_uploaded_object(storage):
+    """A rejected ticket update leaves evidence orphaned; this is the cleanup."""
+    created = client.post(
+        "/api/uploads",
+        files={"file": ("evidence.png", _png_bytes(), "image/png")},
+        data={"uid": "CH-2026-05000"},
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert created.status_code == 200, created.text
+    url = created.json()["url"]
+    key = url.removeprefix("/api/uploads/")
+    assert (settings.minio_bucket, key) in storage.objects
+
+    resp = client.delete(url, headers={"Authorization": "Bearer test-token"})
+    assert resp.status_code == 204
+    assert (settings.minio_bucket, key) not in storage.objects, "the object is still there"
+
+
+def test_delete_is_idempotent_when_the_object_is_already_gone(storage):
+    """Cleanup runs on a failure path; it must not raise a second error."""
+    resp = client.delete(
+        f"/api/uploads/{settings.uploads_prefix}/gone/gone.png",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert resp.status_code == 204
 
 
 def _png_bytes() -> bytes:

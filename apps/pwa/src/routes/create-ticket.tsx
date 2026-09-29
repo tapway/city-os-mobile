@@ -143,7 +143,7 @@ export function CreateTicketPage() {
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 13,
-            fontFamily: 'var(--font-body)', outline: 'none',
+            fontFamily: 'var(--font-body)',
           }}
         />
       </div>
@@ -161,7 +161,7 @@ export function CreateTicketPage() {
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-            fontFamily: 'var(--font-body)', resize: 'vertical', minHeight: 80, outline: 'none',
+            fontFamily: 'var(--font-body)', resize: 'vertical', minHeight: 80,
           }}
         />
       </div>
@@ -178,7 +178,7 @@ export function CreateTicketPage() {
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-            fontFamily: 'var(--font-body)', outline: 'none',
+            fontFamily: 'var(--font-body)',
           }}
         >
           <option value="">— Select type —</option>
@@ -267,7 +267,7 @@ export function CreateTicketPage() {
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-            fontFamily: 'var(--font-body)', outline: 'none', marginBottom: 8,
+            fontFamily: 'var(--font-body)', marginBottom: 8,
           }}
         />
         <label htmlFor="reporter-contact" className="sr-only">Reporter phone number</label>
@@ -279,7 +279,7 @@ export function CreateTicketPage() {
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-            fontFamily: 'var(--font-body)', outline: 'none',
+            fontFamily: 'var(--font-body)',
           }}
         />
       </div>

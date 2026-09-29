@@ -35,20 +35,6 @@ def test_login_uses_allowlisted_origin_for_redirect_uri():
     assert "redirect_uri=https%3A%2F%2Fpwa.example.ts.net%3A9447%2Fauth%2Fcallback" in location
 
 
-def test_login_ignores_an_origin_outside_the_allow_list():
-    """An attacker-supplied origin must not become the redirect_uri."""
-    settings.pwa_origins = "http://localhost:5173"
-    client = TestClient(app)
-    resp = client.get(
-        "/auth/login",
-        params={"origin": "https://evil.example.com"},
-        follow_redirects=False,
-    )
-    location = resp.headers["location"]
-    assert "evil.example.com" not in location
-    assert "redirect_uri=http%3A%2F%2Flocalhost%3A5173%2Fauth%2Fcallback" in location
-
-
 @respx.mock
 def test_callback_exchanges_code_for_tokens():
     """GET /auth/callback must exchange code and set HttpOnly cookie."""
@@ -321,3 +307,60 @@ def test_callback_remembers_the_identity_for_me(monkeypatch):
 def test_me_is_401_without_a_session():
     resp = TestClient(app).get("/auth/me")
     assert resp.status_code == 401
+
+
+def _unquoted_location(resp) -> str:
+    from urllib.parse import unquote
+
+    return unquote(resp.headers["location"])
+
+
+def test_login_honours_the_origin_the_app_reports():
+    """The app tells the BFF which address it is served from, and the allow list
+    decides. This is what makes a tunnel or LAN address work at all: the BFF
+    cannot infer it, because the proxy rewrites Host to the upstream address."""
+    settings.pwa_origins = "http://localhost:5173,https://pwa.example.ts.net:9447"
+    client = TestClient(app)
+    resp = client.get(
+        "/auth/login",
+        params={"origin": "https://pwa.example.ts.net:9447"},
+        follow_redirects=False,
+    )
+    location = _unquoted_location(resp)
+    assert "redirect_uri=https://pwa.example.ts.net:9447/auth/callback" in location, location
+
+
+def test_login_never_derives_the_redirect_from_the_host_header():
+    """A proxied request must not have its Host treated as the app's origin.
+
+    Both vite (`changeOrigin: true`) and a reverse proxy rewrite Host to the
+    upstream address, so deriving the origin from it yields the BFF's internal
+    address — Keycloak then answers with an error page instead of a sign-in form.
+    """
+    settings.pwa_origins = "http://localhost:5173"
+    client = TestClient(app)
+    resp = client.get(
+        "/auth/login",
+        headers={"Host": "localhost:8002", "X-Forwarded-Proto": "https"},
+        follow_redirects=False,
+    )
+    location = _unquoted_location(resp)
+    assert "redirect_uri=http://localhost:5173/auth/callback" in location, location
+
+
+def test_login_ignores_an_origin_outside_the_allow_list():
+    """An attacker-supplied origin must not become the redirect_uri.
+
+    It falls back to the configured default, so the authorization code is never
+    delivered to a host of the attacker's choosing.
+    """
+    settings.pwa_origins = "http://localhost:5173"
+    client = TestClient(app)
+    resp = client.get(
+        "/auth/login",
+        params={"origin": "https://evil.example.com"},
+        follow_redirects=False,
+    )
+    location = _unquoted_location(resp)
+    assert "evil.example.com" not in location
+    assert "redirect_uri=http://localhost:5173/auth/callback" in location, location

@@ -129,7 +129,7 @@ export function TicketsPage() {
             style={{
               flex: 1, background: 'var(--bg-deep)', border: '1px solid var(--border)',
               borderRadius: 2, padding: '8px 10px', color: 'var(--ink)', fontSize: 13,
-              fontFamily: 'var(--font-body)', outline: 'none',
+              fontFamily: 'var(--font-body)',
             }}
           />
           {search && (

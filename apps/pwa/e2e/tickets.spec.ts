@@ -271,4 +271,45 @@ test.describe('Offline behaviour', () => {
     await context.setOffline(false);
     await expect(page.getByText(/offline/i).first()).toBeHidden({ timeout: 20_000 });
   });
+
+  test('an update written offline is queued, then sent when the connection returns', async ({
+    page,
+    context,
+  }) => {
+    // The whole point of the queue: an officer in a lift or a basement must not
+    // lose the work they just typed. This drives the real path — no network,
+    // submit, reconnect — and checks the update reaches the ticket.
+    await login(page);
+
+    const title = `${RUN_TAG} Offline update on Jalan Tebrau`;
+    await createTicket(page, title);
+    const uid = CREATED[CREATED.length - 1];
+
+    // The form needs a fresh fix and a status before it will send.
+    await lockGps(page);
+    const comment = `Written with no signal ${RUN_TAG}`;
+    await page.fill('#update-comment', comment);
+    await page.selectOption('#update-status', 'IN_PROGRESS');
+
+    await context.setOffline(true);
+    await page.getByRole('button', { name: /save update/i }).click();
+
+    // The officer is told their work is safe.
+    await expect(page.getByText(/saved on this device/i)).toBeVisible({ timeout: 20_000 });
+    // While offline the shell shows the offline notice; the waiting count only
+    // replaces it once connectivity is back, so assert the count after that.
+    await expect(page.getByText(/offline — updates will sync/i)).toBeVisible({ timeout: 20_000 });
+
+    // Reconnecting replays it with no further action: nothing is left waiting.
+    // The banner only exists while offline or while something is queued, so its
+    // disappearance is the drain — and the ticket check below is the real proof.
+    await context.setOffline(false);
+    await expect(
+      page.getByText(/update\(s\) waiting to sync|offline — updates will sync/i),
+    ).toBeHidden({ timeout: 40_000 });
+
+    // And it really landed on the ticket.
+    await page.goto(`/tickets/${uid}`);
+    await expect(page.getByText(comment)).toBeVisible({ timeout: 30_000 });
+  });
 });

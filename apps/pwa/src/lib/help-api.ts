@@ -6,7 +6,7 @@
  * the API is inconsistent about the `/v1` segment — tickets and incident types
  * live outside it while events, attendance and workflows live inside it.
  */
-import { apiJson, apiUpload } from './api';
+import { apiFetch, apiJson, apiUpload } from './api';
 
 // ---------------------------------------------------------------- /api/v1/events
 
@@ -121,6 +121,12 @@ export interface StatusUpdate {
   status: string;
   actor: string;
   note?: string;
+  /**
+   * Idempotency key for this logical update. The field app queues an update made
+   * offline and replays it on reconnect, so the same key can legitimately arrive
+   * twice; the server applies it once.
+   */
+  client_request_id?: string;
   /** GPS fix captured at the moment of the update (query params upstream). */
   lat?: number;
   lng?: number;
@@ -135,26 +141,40 @@ export interface StatusUpdate {
  * reads them; when present on a move to IN_PROGRESS the backend records an
  * on-site GPS entry for the ticket (ticket attendance log).
  */
-export async function updateTicketStatus(uid: string, update: StatusUpdate): Promise<TicketDetail> {
+/**
+ * The request a status update makes, as data.
+ *
+ * Shared with the offline queue so a replayed update is identical to the live
+ * one — a second hand-built URL here is how the two would drift apart.
+ */
+export function statusUpdateRequest(
+  uid: string,
+  update: StatusUpdate,
+): { path: string; body: Record<string, unknown> } {
   const search = new URLSearchParams();
   if (typeof update.lat === 'number') search.set('lat', String(update.lat));
   if (typeof update.lng === 'number') search.set('lng', String(update.lng));
   const qs = search.toString();
 
-  return apiJson<TicketDetail>(
-    `/api/tickets/${encodeURIComponent(uid)}/status${qs ? `?${qs}` : ''}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({
-        status: update.status,
-        actor: update.actor,
-        ...(update.note ? { note: update.note } : {}),
-        ...(update.image_urls && update.image_urls.length > 0
-          ? { image_urls: update.image_urls }
-          : {}),
-      }),
+  return {
+    path: `/api/tickets/${encodeURIComponent(uid)}/status${qs ? `?${qs}` : ''}`,
+    body: {
+      status: update.status,
+      actor: update.actor,
+      ...(update.note ? { note: update.note } : {}),
+      ...(update.image_urls && update.image_urls.length > 0
+        ? { image_urls: update.image_urls }
+        : {}),
+      ...(update.client_request_id
+        ? { client_request_id: update.client_request_id }
+        : {}),
     },
-  );
+  };
+}
+
+export async function updateTicketStatus(uid: string, update: StatusUpdate): Promise<TicketDetail> {
+  const { path, body } = statusUpdateRequest(uid, update);
+  return apiJson<TicketDetail>(path, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
 export interface CreateTicketBody {
@@ -271,6 +291,16 @@ export interface UploadResult {
 }
 
 /** Upload a captured photo; returns the URL to store on the ticket. */
+/**
+ * Remove an uploaded evidence object.
+ *
+ * Evidence is uploaded before the ticket update, so an update the server rejects
+ * leaves an object nothing references.
+ */
+export async function deleteImage(url: string): Promise<void> {
+  await apiFetch(url, { method: 'DELETE' });
+}
+
 export async function uploadImage(file: File, uid?: string): Promise<UploadResult> {
   const form = new FormData();
   form.append('file', file);

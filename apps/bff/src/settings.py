@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     # Evidence photos live in the City OS object store (MinIO) under this prefix,
     # which is also the only prefix the read endpoint will serve.
     uploads_prefix: str = "mobile-attachments"
+
+    # Rate limits, per client per minute. They exist to bound amplification on
+    # the endpoints reachable without a session, not to police a user. Offices
+    # and handset fleets commonly sit behind one NAT address, which shares a
+    # single bucket — so these are set well above what a shift of officers
+    # signing in and uploading photos actually produces. Lower them only with
+    # that sharing in mind; `rate_limit_login_per_minute` in particular is a
+    # field-blocking failure when it is hit (an officer cannot sign in at all).
+    rate_limit_login_per_minute: int = 30
+    rate_limit_refresh_per_minute: int = 300
+    rate_limit_upload_per_minute: int = 120
     max_upload_bytes: int = 8 * 1024 * 1024
     allowed_upload_types: str = "image/jpeg,image/png,image/webp,image/heic,image/heif"
 
@@ -82,8 +93,15 @@ class Settings(BaseSettings):
     def redirect_uri_for(self, origin: str | None) -> str:
         """OIDC redirect URI for a browser origin, validated against the allow list.
 
-        Falls back to the configured default so a misconfigured caller gets a
-        deterministic (and rejectable) redirect rather than an open one.
+        The allow list is the only authority. The `Host` header cannot stand in
+        for it: the app reaches the BFF through a proxy and both vite and Caddy
+        rewrite Host to the upstream address (`changeOrigin: true`), so a
+        Host-derived origin is the BFF's *internal* one — which Keycloak then
+        rejects, showing an error page instead of the sign-in form. Likewise a
+        `Referer` is client-supplied and would be an open redirect.
+
+        Falls back to the configured default so a caller with neither a listed
+        origin nor a known one gets a deterministic (and rejectable) redirect.
         """
         if origin:
             candidate = origin.strip().rstrip("/")

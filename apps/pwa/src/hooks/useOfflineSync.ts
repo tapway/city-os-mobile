@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api';
-import { getQueue, syncQueue, type SyncResult } from '../lib/offline-queue';
+import {
+  getQueue,
+  syncQueue,
+  QUEUE_CHANGED_EVENT,
+  type SyncResult,
+} from '../lib/offline-queue';
 import { useOnlineStatus } from './useOnlineStatus';
 
 /**
@@ -37,6 +42,16 @@ export function useOfflineSync() {
 
   useEffect(() => {
     refreshCount();
+  }, [refreshCount]);
+
+  // An update queued while the app is open must show up in the count straight
+  // away, not at the next remount.
+  useEffect(() => {
+    const onChange = () => {
+      void refreshCount();
+    };
+    window.addEventListener(QUEUE_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(QUEUE_CHANGED_EVENT, onChange);
   }, [refreshCount]);
 
   // Replay as soon as the device is back online.

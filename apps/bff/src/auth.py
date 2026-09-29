@@ -9,7 +9,7 @@ import json
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 from .pkce import (
@@ -20,6 +20,7 @@ from .pkce import (
     revoke_token,
     generate_verifier_and_challenge,
 )
+from .ratelimit import rate_limit
 from .settings import settings
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,12 @@ def _redirect_uri(request: Request) -> str:
     return settings.redirect_uri_for(_origin_cookie_value(request) or None)
 
 
-@router.get("/login")
+@router.get(
+    "/login",
+    dependencies=[
+        Depends(rate_limit("login", limit=settings.rate_limit_login_per_minute, window_seconds=60))
+    ],
+)
 async def login(request: Request, origin: str = ""):
     """Redirect to Keycloak OIDC authorization with PKCE.
 
@@ -54,6 +60,15 @@ async def login(request: Request, origin: str = ""):
     verifier, challenge = generate_verifier_and_challenge()
     state = os.urandom(16).hex()
     redirect_uri = settings.redirect_uri_for(origin or None)
+    # A rejected origin is invisible to the user — Keycloak answers with an error
+    # page — so say it in the log, naming the fix.
+    if origin.strip().rstrip("/") not in settings.pwa_origins_list:
+        logger.warning(
+            "Ignoring origin %r for the login redirect: not in PWA_ORIGINS (%s). "
+            "Add it there to sign in from that address.",
+            origin,
+            settings.pwa_origins,
+        )
     resolved_origin = redirect_uri[: -len("/auth/callback")]
 
     auth_url = build_auth_url(
@@ -227,7 +242,16 @@ def _token_response(access_token: str, expires_in: int, refresh_token: str | Non
     return response
 
 
-@router.post("/refresh")
+@router.post(
+    "/refresh",
+    dependencies=[
+        Depends(
+            rate_limit(
+                "refresh", limit=settings.rate_limit_refresh_per_minute, window_seconds=60
+            )
+        )
+    ],
+)
 async def refresh(request: Request):
     """Silent renew using the HttpOnly refresh cookie.
 

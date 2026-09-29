@@ -3,15 +3,18 @@
 Photos are stored in the City OS object store (MinIO) and referenced on a
 ticket by URL, which is the same pattern City Help uses for Jira attachments.
 
-Two routes:
+Three routes:
   POST /api/uploads          multipart upload, requires a valid bearer token
-  GET  /api/uploads/{key}    stream an object back (used by <img src>)
+  GET    /api/uploads/{key}  stream an object back (used by <img src>)
+  DELETE /api/uploads/{key}  remove evidence orphaned by a rejected update
 
 The read route cannot require an Authorization header — browsers do not send
 one for image tags — so it is protected by an unguessable object key and by
 only ever serving keys under the configured uploads prefix.
 """
 from __future__ import annotations
+
+import asyncio
 
 import io
 import logging
@@ -20,8 +23,9 @@ import uuid
 from datetime import date
 
 import httpx
-from fastapi import APIRouter, File, Form, Header, HTTPException, Response, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Response, UploadFile, Depends
 
+from .ratelimit import rate_limit
 from .settings import settings
 
 logger = logging.getLogger(__name__)
@@ -87,7 +91,12 @@ def _storage():
     )
 
 
-@router.post("/api/uploads")
+@router.post(
+    "/api/uploads",
+    dependencies=[
+        Depends(rate_limit("upload", limit=settings.rate_limit_upload_per_minute, window_seconds=60))
+    ],
+)
 async def upload_evidence(
     file: UploadFile = File(...),
     ticket_uid: str | None = Form(default=None),
@@ -145,6 +154,42 @@ async def upload_evidence(
         "size": len(data),
         "content_type": content_type,
     }
+
+
+@router.delete("/api/uploads/{object_key:path}")
+async def delete_evidence(
+    object_key: str, authorization: str | None = Header(default=None)
+) -> Response:
+    """Remove an uploaded object.
+
+    The app uploads evidence *before* the ticket update, so an update the server
+    rejects outright leaves an object nothing references. The client deletes it
+    here rather than leaving the bucket to accumulate orphans.
+
+    Authenticated and prefix-checked: this is a write, and it must not be usable
+    to reach anything outside the uploads prefix.
+    """
+    token = _require_bearer(authorization)
+    await _verify_token(token)
+
+    if not object_key.startswith(f"{settings.uploads_prefix}/"):
+        raise HTTPException(400, "Object is not an evidence upload")
+
+    def _remove() -> None:
+        client = _storage()
+        if client is None:
+            return
+        try:
+            client.remove_object(settings.minio_bucket, object_key)
+        except Exception as exc:  # already gone, or storage unavailable
+            logger.info("Evidence not deleted (%s): %s", object_key, exc)
+
+    try:
+        await asyncio.to_thread(_remove)
+    except Exception as exc:
+        logger.error("Evidence delete failed for %s: %s", object_key, exc)
+
+    return Response(status_code=204)
 
 
 @router.get("/api/uploads/{object_key:path}")
