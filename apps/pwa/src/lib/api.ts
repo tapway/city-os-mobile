@@ -16,42 +16,100 @@ export class ApiError extends Error {
   }
 }
 
+/** Pull the human-readable reason out of a FastAPI error body. */
+export function errorDetail(payload: unknown): string | null {
+  if (!payload) return null;
+  if (typeof payload === 'string') {
+    try {
+      return errorDetail(JSON.parse(payload));
+    } catch {
+      return payload.slice(0, 300) || null;
+    }
+  }
+  if (typeof payload === 'object') {
+    const detail = (payload as { detail?: unknown }).detail;
+    if (typeof detail === 'string') return detail;
+    // FastAPI validation errors: [{loc, msg, type}, ...]
+    if (Array.isArray(detail)) {
+      return detail
+        .map((d) => {
+          if (typeof d === 'string') return d;
+          const loc = Array.isArray((d as { loc?: unknown[] }).loc)
+            ? (d as { loc: unknown[] }).loc.slice(1).join('.')
+            : '';
+          const msg = (d as { msg?: string }).msg ?? JSON.stringify(d);
+          return loc ? `${loc}: ${msg}` : msg;
+        })
+        .join('; ');
+    }
+  }
+  return null;
+}
+
 function buildHeaders(init: RequestInit, token: string | null): Headers {
   const headers = new Headers(init.headers);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  // Only set Content-Type for requests with a body (POST/PATCH/PUT)
-  if (init.body && !headers.has('Content-Type')) {
+  // Only set Content-Type for requests with a body. FormData must keep the
+  // boundary the browser generated, so never force JSON onto it.
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
+  if (init.body && !isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   return headers;
 }
 
-export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+export interface ApiFetchOptions extends RequestInit {
+  /** Skip the 401 → refresh → retry dance (used by the refresh path itself). */
+  noRetry?: boolean;
+}
+
+export async function apiFetch(
+  input: string,
+  init: ApiFetchOptions = {},
+): Promise<Response> {
+  const { noRetry, ...rest } = init;
   const token = getAccessToken();
-  const headers = buildHeaders(init, token);
+  const headers = buildHeaders(rest, token);
 
-  const resp = await fetch(input, { ...init, headers, credentials: 'include' });
+  const resp = await fetch(input, { ...rest, headers, credentials: 'include' });
 
-  if (resp.status === 401) {
+  if (resp.status === 401 && !noRetry) {
     const newToken = await refreshAccessToken();
     if (newToken) {
-      const retryHeaders = buildHeaders(init, newToken);
-      return fetch(input, { ...init, headers: retryHeaders, credentials: 'include' });
+      const retryHeaders = buildHeaders(rest, newToken);
+      const retried = await fetch(input, { ...rest, headers: retryHeaders, credentials: 'include' });
+      if (retried.status !== 401) {
+        if (!retried.ok) throw await toApiError(retried);
+        return retried;
+      }
     }
-    throw new ApiError(401, 'Session expired — please log in again');
+    throw new ApiError(401, 'Session expired — please sign in again');
   }
 
   if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new ApiError(resp.status, `API error ${resp.status}`, text);
+    throw await toApiError(resp);
   }
 
   return resp;
 }
 
-export async function apiJson<T = unknown>(input: string, init?: RequestInit): Promise<T> {
+async function toApiError(resp: Response): Promise<ApiError> {
+  const text = await resp.text().catch(() => '');
+  const detail = errorDetail(text);
+  const fallback =
+    resp.status === 403
+      ? 'You do not have permission to do that'
+      : resp.status === 404
+        ? 'Not found'
+        : resp.status >= 500
+          ? 'The server had a problem — please try again'
+          : `API error ${resp.status}`;
+  return new ApiError(resp.status, detail || fallback, text);
+}
+
+export async function apiJson<T = unknown>(input: string, init?: ApiFetchOptions): Promise<T> {
   const resp = await apiFetch(input, init);
   // Handle 204 No Content or empty body
   if (resp.status === 204 || resp.headers.get('content-length') === '0') {
@@ -62,4 +120,12 @@ export async function apiJson<T = unknown>(input: string, init?: RequestInit): P
     return null as T;
   }
   return resp.json() as Promise<T>;
+}
+
+/** POST a file (or anything multipart) with auth + refresh handling. */
+export async function apiUpload<T = unknown>(
+  input: string,
+  form: FormData,
+): Promise<T> {
+  return apiJson<T>(input, { method: 'POST', body: form });
 }

@@ -88,3 +88,49 @@ def test_proxy_returns_502_on_upstream_error():
     )
     assert resp.status_code == 502
     assert "City Help API unreachable" in resp.text
+
+
+# ── Path-traversal guard ────────────────────────────────────────────────────
+# httpx normalises dot segments *after* the upstream URL is built, so before
+# this guard an unvalidated path escaped the /api prefix entirely: a live probe
+# of GET /api/../openapi.json returned the 121 KB City Help OpenAPI schema with
+# a junk token. Starlette percent-decodes before the handler sees the path, so
+# the encoded form is decoded into a literal ".." and caught here too.
+
+
+def test_proxy_rejects_encoded_traversal():
+    """%2e%2e survives httpx normalisation, so the guard itself must reject it."""
+    client = TestClient(app)
+    resp = client.get(
+        "/api/%2e%2e/openapi.json", headers={"Authorization": "Bearer test-token"}
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_proxy_rejects_absolute_path_smuggling():
+    """A leading slash must not let a caller choose the upstream path."""
+    client = TestClient(app)
+    resp = client.get(
+        "/api//openapi.json", headers={"Authorization": "Bearer test-token"}
+    )
+    assert resp.status_code in (400, 404), resp.text
+
+
+@respx.mock(assert_all_called=False)  # the mock is a tripwire, not a requirement
+def test_traversal_never_reaches_the_upstream_host():
+    """Whatever the encoding, the request must not be forwarded upstream.
+
+    Only the encodings that survive httpx's own normalisation are used here: a
+    bare "./" is removed by httpx before the handler runs, so it never tests
+    this guard. `%2e%2e` and `..%2f` do reach the handler, where Starlette has
+    already decoded them into a literal "..".
+    """
+    base = settings.city_help_api_url.rstrip("/")
+    leaked = respx.route(url__startswith=base).mock(
+        return_value=httpx.Response(200, json={"leaked": True})
+    )
+    client = TestClient(app)
+    for attack in ("/api/%2e%2e/openapi.json", "/api/..%2fopenapi.json"):
+        resp = client.get(attack, headers={"Authorization": "Bearer test-token"})
+        assert resp.status_code == 400, f"{attack} -> {resp.status_code}"
+    assert not leaked.called, f"traversal reached the upstream host: {leaked.calls}"

@@ -1,8 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RouterProvider, createRouter, createRootRoute, createRoute } from '@tanstack/react-router';
-import { initFromCallbackFragment } from './lib/auth';
+import { RouterProvider, createRouter, createRootRoute, createRoute, redirect } from '@tanstack/react-router';
+import { bootstrapSession, initFromCallbackFragment } from './lib/auth';
 import { RootLayout } from './routes/__root';
 import { LoginPage } from './routes/login';
 import { TicketsPage } from './routes/tickets';
@@ -19,6 +19,27 @@ if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
 
 // Check for OAuth callback fragment on first load
 initFromCallbackFragment();
+
+/**
+ * Session bootstrap, resolved once per page load.
+ *
+ * Screens must not decide "signed out" from the in-memory token alone: after a
+ * reload or a phone waking up, the memory is empty but the HttpOnly refresh
+ * cookie may still be valid. Awaiting this first means a returning user lands
+ * straight on their tickets instead of being bounced to the login screen.
+ */
+let sessionPromise: Promise<boolean> | null = null;
+function ensureSession(): Promise<boolean> {
+  if (!sessionPromise) sessionPromise = bootstrapSession();
+  return sessionPromise;
+}
+
+async function requireAuth(search: { returnTo?: string }): Promise<void> {
+  const ok = await ensureSession();
+  if (!ok) {
+    throw redirect({ to: '/login', search: { returnTo: search.returnTo } as never });
+  }
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,36 +59,44 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
   component: LoginPage,
+  validateSearch: (search: Record<string, unknown>): { returnTo?: string } => ({
+    returnTo: typeof search.returnTo === 'string' ? search.returnTo : undefined,
+  }),
 });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   component: TicketsPage,
+  beforeLoad: () => requireAuth({}),
 });
 
 const ticketsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tickets',
   component: TicketsPage,
+  beforeLoad: () => requireAuth({}),
 });
 
 const ticketDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tickets/$id',
   component: TicketDetailPage,
+  beforeLoad: () => requireAuth({}),
 });
 
 const attendanceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/attendance',
   component: AttendancePage,
+  beforeLoad: () => requireAuth({}),
 });
 
 const createTicketRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/create-ticket',
   component: CreateTicketPage,
+  beforeLoad: () => requireAuth({}),
 });
 
 const routeTree = rootRoute.addChildren([
