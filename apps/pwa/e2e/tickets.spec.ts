@@ -118,8 +118,12 @@ test.describe('Ticket journey', () => {
 
     // The activity timeline must show the comment without a manual reload.
     await expect(page.getByText(comment)).toBeVisible({ timeout: 40_000 });
-    // Scope to the timeline: a bare getByText('IN PROGRESS') matches the hidden
-    // <option> in the status control first, and that element is never visible.
+    // The app confirms the update, and the ticket now reads as in progress in
+    // the timeline. A bare getByText('IN PROGRESS') would match the hidden
+    // <option> in the status control, which is never visible.
+    await expect(page.getByText(/ticket updated with your gps position/i)).toBeVisible({
+      timeout: 20_000,
+    });
     await expect(
       page.locator('[data-testid="timeline"]').getByText(/in progress/i),
     ).toBeVisible({ timeout: 20_000 });
@@ -157,6 +161,10 @@ test.describe('Ticket journey', () => {
     await page.getByRole('button', { name: /save update/i }).click();
     await expect(page.getByText(`Photo attached ${RUN_TAG}`)).toBeVisible({ timeout: 40_000 });
 
+    // Re-open the ticket, as a returning officer would: the stored evidence must
+    // come back from the server, not just from the upload preview.
+    await page.reload();
+    await expect(page.getByText(`Photo attached ${RUN_TAG}`)).toBeVisible({ timeout: 30_000 });
     const stored = page.locator('img[src*="/api/uploads/"]').first();
     await expect(stored).toBeVisible({ timeout: 30_000 });
     const src = await stored.getAttribute('src');
@@ -182,7 +190,7 @@ test.describe('Attendance', () => {
     await control.click();
 
     await expect(
-      page.getByText(/clocked in|clocked out|not clocked in/i).first(),
+      page.getByText(/active|completed|not clocked in/i).first(),
     ).toBeVisible({ timeout: 30_000 });
   });
 });
