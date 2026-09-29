@@ -4,7 +4,8 @@
  *
  * These are deliberately end-to-end: they drive the actual OIDC login form,
  * the real API and real writes. Every test creates the ticket it works on, so
- * the journey is self-contained and the demo data is not disturbed.
+ * the journey is self-contained, and every ticket it creates is retired
+ * afterwards so the demo data is not left littered with test tickets.
  *
  * Credentials come from the environment, defaulting to the local development
  * realm's UAT account (see docs/testing.md).
@@ -52,6 +53,57 @@ async function lockGps(page: Page) {
   await expect(page.getByText(new RegExp(GPS_LAT)).first()).toBeVisible({ timeout: 20_000 });
 }
 
+/** Tickets this run created. Retired in afterAll — the API has no delete. */
+const CREATED: string[] = [];
+
+/**
+ * A token for housekeeping only. The app keeps its access token in memory, so
+ * the test fetches its own (the realm's mobile client is public — no secret, so
+ * nothing sensitive belongs in this file).
+ */
+async function housekeepingToken(): Promise<string | null> {
+  try {
+    const resp = await fetch(
+      'http://localhost:7080/realms/city-os/protocol/openid-connect/token',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'password',
+          client_id: process.env.E2E_KC_CLIENT ?? 'city-os-mobile',
+          username: USERNAME,
+          password: PASSWORD,
+          scope: 'openid profile',
+        }),
+      },
+    );
+    if (!resp.ok) return null;
+    return ((await resp.json()) as { access_token?: string }).access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Void a ticket this run created, so the demo list stays clean. */
+async function retireTicket(uid: string, token: string): Promise<void> {
+  const base = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
+  const resp = await fetch(`${base}/api/v1/events/${uid}/void`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  // Loud on purpose: a silent cleanup failure is how test tickets accumulate in
+  // the demo data. The path is /api/v1/events/... — without the v1 it 404s.
+  if (!resp.ok) throw new Error(`could not retire ${uid}: HTTP ${resp.status}`);
+}
+
+test.afterAll(async () => {
+  if (CREATED.length === 0) return;
+  const token = await housekeepingToken();
+  if (!token) return;
+  for (const uid of CREATED) await retireTicket(uid, token);
+});
+
 /** Create a ticket through the UI and land on its detail screen. */
 async function createTicket(page: Page, title: string) {
   await page.goto('/create-ticket');
@@ -63,6 +115,7 @@ async function createTicket(page: Page, title: string) {
 
   await page.getByRole('button', { name: /submit report/i }).click();
   await page.waitForURL(/\/tickets\/[^/]+$/, { timeout: 40_000 });
+  CREATED.push(new URL(page.url()).pathname.split('/').pop() as string);
 }
 
 test.describe('PWA shell', () => {
