@@ -128,7 +128,11 @@ test.describe('Ticket journey', () => {
       page.locator('[data-testid="timeline"]').getByText(/in progress/i),
     ).toBeVisible({ timeout: 20_000 });
 
-    // And it survives a reload (i.e. it was really persisted).
+    // And it survives a reload (i.e. it was really persisted). Settle first:
+    // reloading mid-flight aborts the update's follow-up requests, and an
+    // aborted refresh can leave the browser holding a refresh token the server
+    // has already rotated away — which signs the next load out.
+    await page.waitForLoadState('networkidle');
     await page.reload();
     await expect(page.getByText(comment)).toBeVisible({ timeout: 30_000 });
   });
@@ -162,7 +166,9 @@ test.describe('Ticket journey', () => {
     await expect(page.getByText(`Photo attached ${RUN_TAG}`)).toBeVisible({ timeout: 40_000 });
 
     // Re-open the ticket, as a returning officer would: the stored evidence must
-    // come back from the server, not just from the upload preview.
+    // come back from the server, not just from the upload preview. Settle first
+    // (see the note in the journey test about aborted in-flight requests).
+    await page.waitForLoadState('networkidle');
     await page.reload();
     await expect(page.getByText(`Photo attached ${RUN_TAG}`)).toBeVisible({ timeout: 30_000 });
     const stored = page.locator('img[src*="/api/uploads/"]').first();
@@ -183,12 +189,19 @@ test.describe('Attendance', () => {
     await lockGps(page);
 
     // The day's attendance is durable, so an earlier run can leave the officer
-    // already clocked in and only "Clock out" is offered. Drive whichever
-    // control the current state presents, and require the badge to reflect it.
+    // already clocked in — or already finished, in which case the page correctly
+    // offers no control at all. Drive whichever state is presented.
     const control = page.getByRole('button', { name: /clock (in|out)/i }).first();
-    await expect(control).toBeEnabled({ timeout: 20_000 });
-    await control.click();
+    await expect(control.or(page.getByText(/completed/i).first())).toBeVisible({
+      timeout: 20_000,
+    });
 
+    if (await control.count() > 0) {
+      await expect(control).toBeEnabled({ timeout: 20_000 });
+      await control.click();
+    }
+
+    // Either way the shift is now in a terminal state for today.
     await expect(
       page.getByText(/active|completed|not clocked in/i).first(),
     ).toBeVisible({ timeout: 30_000 });
