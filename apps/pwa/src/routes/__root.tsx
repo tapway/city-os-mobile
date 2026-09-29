@@ -1,5 +1,6 @@
 import { Outlet, Link, useLocation } from '@tanstack/react-router';
-import { List, Clock, Plus } from 'lucide-react';
+import { List, Clock, Plus, LogOut } from 'lucide-react';
+import { logout } from '../lib/auth';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useOfflineSync } from '../hooks/useOfflineSync';
 
@@ -30,6 +31,40 @@ export function RootLayout() {
 
   return (
     <div className="app-shell" style={{ background: 'var(--bg-deep)' }}>
+      {!isLogin && (
+        <header
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 12, padding: '10px 16px', background: 'var(--glass)',
+            borderBottom: '1px solid var(--border)', backdropFilter: 'blur(24px)',
+          }}
+        >
+          <span
+            style={{
+              fontFamily: 'var(--font-label)', fontSize: 10, letterSpacing: '0.16em',
+              textTransform: 'uppercase', color: 'var(--ink-dim)',
+            }}
+          >
+            City OS Operations
+          </span>
+          {/* A field officer hands the handset over at the end of a shift; without
+              this the session (and the cached screens) stayed on the device. */}
+          <button
+            type="button"
+            onClick={() => void logout()}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
+              background: 'transparent', border: '1px solid var(--border)',
+              borderRadius: 2, color: 'var(--ink-dim)', cursor: 'pointer',
+              fontFamily: 'var(--font-label)', fontSize: 10,
+              letterSpacing: '0.1em', textTransform: 'uppercase',
+            }}
+          >
+            <LogOut size={14} aria-hidden="true" />
+            Sign out
+          </button>
+        </header>
+      )}
       <main className="app-content">
         {!isLogin && (!online || pending > 0) && (
           <div

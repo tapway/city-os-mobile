@@ -179,10 +179,27 @@ export function loginRedirect(): void {
   window.location.href = `/auth/login${target}`;
 }
 
+/** Drop everything the service worker stored for this session.
+ *
+ * Cache Storage is keyed by URL rather than by user, so a handset that changes
+ * hands must not keep the previous officer's responses. The shell is
+ * re-precached on the next load, so clearing everything is safe.
+ */
+async function clearCachedResponses(): Promise<void> {
+  if (typeof caches === 'undefined') return;
+  try {
+    const names = await caches.keys();
+    await Promise.all(names.map((name) => caches.delete(name)));
+  } catch {
+    // Storage unavailable (private mode, quota) — nothing to clear.
+  }
+}
+
 export async function logout(): Promise<void> {
   try {
     await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
   } finally {
+    await clearCachedResponses();
     clearAccessToken();
     window.location.href = '/login';
   }
