@@ -47,7 +47,7 @@ function rememberUser(token: string): void {
   currentUser = {
     sub: (claims.sub as string) ?? null,
     name: (claims.name as string) ?? null,
-    username: ((claims.preferred_username as string) || (claims.name as string)) ?? null,
+    username: (claims.preferred_username as string) ?? null,
     roles: realmAccess?.roles ?? [],
   };
 }
@@ -78,7 +78,11 @@ export function getSessionUser(): SessionUser | null {
 
 /** Actor string used for API writes — the human readable name, never a raw sub. */
 export function getActor(): string {
-  return currentUser?.name || currentUser?.username || 'mobile';
+  // The actor is persisted — on ticket events, and as the user_refs foreign key
+  // in ticket_attendance_logs — so it must be a stable identifier. The display
+  // name is not one: it carries spaces and matches no user_refs.id, so sending
+  // it makes every GPS/attendance write fail its foreign key.
+  return currentUser?.username || currentUser?.sub || 'mobile';
 }
 
 export function clearAccessToken(): void {
@@ -122,10 +126,36 @@ export async function refreshAccessToken(): Promise<string | null> {
  * neither exists do we spend a network round trip on the refresh cookie.
  */
 export async function bootstrapSession(): Promise<boolean> {
-  if (getAccessToken()) return true;
-  if (initFromCallbackFragment()) return true;
-  const refreshed = await refreshAccessToken();
-  return Boolean(refreshed);
+  if (!getAccessToken() && !initFromCallbackFragment()) {
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) return false;
+  }
+  // The identity comes from the BFF: this realm's access token carries neither
+  // preferred_username nor sub, so it cannot say who is signed in.
+  if (!currentUser || !currentUser.username) await hydrateUser();
+  return true;
+}
+
+/**
+ * Ask the BFF who we are. The access token this realm issues carries only a
+ * display name, and the app needs a stable identifier for attribution and for
+ * the attendance/GPS foreign key — the BFF reads it from the ID token it holds.
+ */
+export async function hydrateUser(): Promise<SessionUser | null> {
+  try {
+    const resp = await fetch('/auth/me', { credentials: 'include' });
+    if (!resp.ok) return currentUser; // keep whatever we already have
+    const me = (await resp.json()) as Partial<SessionUser>;
+    currentUser = {
+      sub: me.sub ?? null,
+      username: me.username ?? null,
+      name: me.name ?? null,
+      roles: me.roles ?? [],
+    };
+    return currentUser;
+  } catch {
+    return currentUser;
+  }
 }
 
 export function initFromCallbackFragment(): boolean {

@@ -281,3 +281,43 @@ def test_refresh_clears_cookie_when_the_token_is_really_dead(monkeypatch):
 
     assert resp.status_code == 401
     assert "refresh_token" in resp.headers.get("set-cookie", "")
+
+def test_callback_remembers_the_identity_for_me(monkeypatch):
+    """The app cannot read the officer's identity from the access token, so the
+    BFF keeps it and serves it at /auth/me."""
+    import base64, json as _json
+    from src import auth as auth_mod
+
+    def _jwt(payload: dict) -> str:
+        seg = base64.urlsafe_b64encode(_json.dumps(payload).encode()).decode().rstrip("=")
+        return f"header.{seg}.sig"
+
+    id_token = _jwt({
+        "sub": "user-ops-user",
+        "preferred_username": "ops_user",
+        "name": "Operations User",
+        "realm_access": {"roles": ["officer"]},
+    })
+
+    async def fake_exchange(**kwargs):
+        return {"access_token": _jwt({"aud": "city-os-mobile"}), "refresh_token": "r", "id_token": id_token}
+
+    monkeypatch.setattr(auth_mod, "exchange_code_for_tokens", fake_exchange)
+
+    client = TestClient(app)
+    client.cookies.set("oauth_state", "st")
+    client.cookies.set("pkce_verifier", "vf")
+    resp = client.get("/auth/callback?code=abc&state=st", follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert "session_user" in resp.headers.get("set-cookie", "")
+
+    me = client.get("/auth/me")
+    assert me.status_code == 200
+    assert me.json()["username"] == "ops_user"
+    assert me.json()["sub"] == "user-ops-user"
+
+
+def test_me_is_401_without_a_session():
+    resp = TestClient(app).get("/auth/me")
+    assert resp.status_code == 401

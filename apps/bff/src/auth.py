@@ -4,6 +4,7 @@ The BFF holds the refresh token as an HttpOnly cookie, never exposing it to
 the PWA JavaScript context. The PWA receives only short-lived access tokens
 in memory.
 """
+import base64
 import json
 import logging
 import os
@@ -141,12 +142,64 @@ async def callback(
             path="/",
         )
 
+    _set_identity_cookie(response, tokens)
+
     # Clear the one-shot PKCE cookies
     response.delete_cookie("pkce_verifier", path="/")
     response.delete_cookie("oauth_state", path="/")
     response.delete_cookie("oauth_origin", path="/")
 
     return response
+
+
+SESSION_USER_COOKIE = "session_user"
+
+
+def _identity_claims(tokens: dict) -> dict:
+    """Who is signed in, taken from the tokens Keycloak just returned.
+
+    This realm's access token carries neither `preferred_username` nor `sub`
+    (only a display `name`), so a client cannot name the officer from it — and
+    the API needs an identifier it can persist, both on ticket events and as the
+    `user_refs` foreign key behind GPS/attendance logging. The ID token has the
+    claims and is already in hand here, so the identity is read from it and
+    handed to the app through /auth/me.
+    """
+    for key in ("id_token", "access_token"):
+        token = tokens.get(key)
+        if not token:
+            continue
+        try:
+            payload = token.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+        except Exception:  # malformed payload — try the next token
+            continue
+        username, sub = claims.get("preferred_username"), claims.get("sub")
+        if username or sub:
+            return {
+                "sub": sub,
+                "username": username,
+                "name": claims.get("name"),
+                "roles": (claims.get("realm_access") or {}).get("roles", []),
+            }
+    return {}
+
+
+def _set_identity_cookie(response: Response, tokens: dict) -> None:
+    """Remember the identity for /auth/me. Not a credential: claims only."""
+    identity = _identity_claims(tokens)
+    if not identity:
+        return
+    response.set_cookie(
+        key=SESSION_USER_COOKIE,
+        value=json.dumps(identity),
+        httponly=True,
+        max_age=settings.refresh_token_ttl_hours * 3600,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        path="/",
+    )
 
 
 def _token_response(access_token: str, expires_in: int, refresh_token: str | None) -> Response:
@@ -205,11 +258,13 @@ async def refresh(request: Request):
         response.delete_cookie("refresh_token", path="/")
         return response
 
-    return _token_response(
+    response = _token_response(
         access_token=tokens["access_token"],
         expires_in=tokens.get("expires_in", settings.access_token_ttl_minutes * 60),
         refresh_token=tokens.get("refresh_token"),
     )
+    _set_identity_cookie(response, tokens)
+    return response
 
 
 @router.post("/logout")
@@ -226,7 +281,25 @@ async def logout(request: Request):
         status_code=200,
     )
     response.delete_cookie("refresh_token", path="/")
+    response.delete_cookie(SESSION_USER_COOKIE, path="/")
     response.delete_cookie("pkce_verifier", path="/")
     response.delete_cookie("oauth_state", path="/")
     response.delete_cookie("oauth_origin", path="/")
     return response
+
+
+@router.get("/me")
+async def me(request: Request):
+    """Who the PWA is signed in as.
+
+    The app uses this for attribution on ticket events and as the acting user on
+    GPS/attendance writes, which it cannot read from the access token this realm
+    issues (see _identity_claims).
+    """
+    raw = request.cookies.get(SESSION_USER_COOKIE)
+    if not raw:
+        raise HTTPException(401, "Not signed in")
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise HTTPException(401, "Not signed in")
