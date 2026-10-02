@@ -4,6 +4,7 @@ import {
   classifyFailure,
   syncNotice,
   authNotice,
+  shouldRecord,
   syncQueue,
   enqueueMutation,
   getQueue,
@@ -137,5 +138,71 @@ describe('syncQueue failure handling', () => {
       { deleteEvidence: async () => { throw new Error('boom'); } },
     );
     expect(res).toEqual({ synced: 1, failed: 0, dropped: 1 });
+  });
+});
+
+describe('per-ticket ordering', () => {
+  beforeEach(async () => {
+    await clearQueue();
+  });
+  const add = (uid: string, status: string) =>
+    enqueueMutation({ url: `/api/tickets/${uid}/status`, method: 'PATCH', body: { status, client_request_id: `${uid}-${status}` } });
+  const sent: string[] = [];
+  const fetchWith = (fail: Record<string, number>) => async (url: string, init: RequestInit) => {
+    const status = JSON.parse(String(init.body)).status as string;
+    sent.push(`${url.split('/')[3]}:${status}`);
+    const code = fail[`${url.split('/')[3]}:${status}`];
+    if (code !== undefined) throw new ApiError(code, 'x');
+    return new Response('{}', { status: 200 });
+  };
+  beforeEach(() => { sent.length = 0; });
+
+  it.each([503, 429, 408, 0])('holds later entries for a ticket whose earlier entry got %i', async (code) => {
+    await add('T-1', 'ASSIGNED');
+    await add('T-2', 'ASSIGNED');
+    await add('T-1', 'IN_PROGRESS');
+    const res = await syncQueue(fetchWith({ 'T-1:ASSIGNED': code }));
+    expect(sent).toEqual(['T-1:ASSIGNED', 'T-2:ASSIGNED']); // Start not sent, other ticket still sent
+    expect(res).toEqual({ synced: 1, failed: 2, dropped: 0 });
+    const left = (await getQueue()).map((q) => (q.body as { status: string }).status);
+    expect(left).toEqual(['ASSIGNED', 'IN_PROGRESS']); // order kept, nothing dropped
+  });
+
+  it('the next sync sends Accept then Start', async () => {
+    await add('T-1', 'ASSIGNED');
+    await add('T-1', 'IN_PROGRESS');
+    await syncQueue(fetchWith({ 'T-1:ASSIGNED': 503 }));
+    sent.length = 0;
+    const res = await syncQueue(fetchWith({}));
+    expect(sent).toEqual(['T-1:ASSIGNED', 'T-1:IN_PROGRESS']);
+    expect(res).toMatchObject({ synced: 2, dropped: 0 });
+    expect(await getQueue()).toHaveLength(0);
+  });
+
+  it('a dropped entry does not hold later ones for its ticket', async () => {
+    await add('T-1', 'ASSIGNED');
+    await add('T-1', 'IN_PROGRESS');
+    await syncQueue(fetchWith({ 'T-1:ASSIGNED': 422 }));
+    expect(sent).toEqual(['T-1:ASSIGNED', 'T-1:IN_PROGRESS']);
+  });
+});
+
+describe('overlapping syncs', () => {
+  beforeEach(async () => {
+    await clearQueue();
+  });
+  it('a sync skipped because one is running says so and is not recorded', async () => {
+    await enqueueMutation({ url: '/api/tickets/T-1/status', method: 'PATCH', body: { status: 'ASSIGNED' } });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const first = syncQueue(async () => { await gate; return new Response('{}', { status: 200 }); });
+    await new Promise((r) => setTimeout(r, 20));
+    const second = await syncQueue(async () => new Response('{}'));
+    expect(second.skipped).toBe(true);
+    expect(shouldRecord(second)).toBe(false);
+    release();
+    const done = await first;
+    expect(done.skipped).toBeUndefined();
+    expect(shouldRecord(done)).toBe(true);
   });
 });

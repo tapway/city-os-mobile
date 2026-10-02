@@ -76,6 +76,19 @@ export interface SyncResult {
   dropped: number;
   /** Set when a 401 paused the sync; `failed` then counts every entry still queued. */
   authRequired?: true;
+  /** Set when another sync was already running; nothing was attempted. */
+  skipped?: true;
+}
+
+/** An overlapping sync did nothing, so its result must not replace the last real one. */
+export function shouldRecord(result: SyncResult): boolean {
+  return !result.skipped;
+}
+
+/** The ticket a queued request belongs to (…/tickets/{uid}/… or …/events/{uid}/…), else its URL. */
+function ticketKey(url: string): string {
+  const m = /\/(?:tickets|events)\/([^/?]+)/.exec(url);
+  return m ? m[1]! : url;
 }
 
 /** "Sign in again to send {n} pending update(s)", or null when the sync was not paused. */
@@ -134,7 +147,7 @@ export async function syncQueue(
   fetchFn: (url: string, init: RequestInit) => Promise<Response>,
   opts: SyncOptions = {},
 ): Promise<SyncResult> {
-  if (syncing) return { synced: 0, failed: 0, dropped: 0 };
+  if (syncing) return { synced: 0, failed: 0, dropped: 0, skipped: true };
   syncing = true;
   try {
     const queue = await getQueue();
@@ -142,7 +155,17 @@ export async function syncQueue(
     let failed = 0;
     let dropped = 0;
 
+    // Tickets with an entry that must be retried: later entries for them wait,
+    // in order, for the next sync (sending Start before a failed Accept would 409
+    // and the Start would be dropped).
+    const held = new Set<string>();
+
     for (const [index, item] of queue.entries()) {
+      const key = ticketKey(item.url);
+      if (held.has(key)) {
+        failed++;
+        continue;
+      }
       let status: number;
       try {
         const resp = await fetchFn(item.url, {
@@ -173,6 +196,7 @@ export async function syncQueue(
         }
       } else {
         failed++;
+        held.add(key);
       }
     }
 

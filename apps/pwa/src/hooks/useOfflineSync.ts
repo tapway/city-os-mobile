@@ -5,6 +5,7 @@ import { deleteImage } from '../lib/help-api';
 import {
   getQueue,
   syncQueue,
+  shouldRecord,
   QUEUE_CHANGED_EVENT,
   type SyncResult,
 } from '../lib/offline-queue';
@@ -39,6 +40,7 @@ export function useOfflineSync() {
       const result = await syncQueue((url, init) => apiFetch(url, init), {
         deleteEvidence: deleteImage,
       });
+      if (!shouldRecord(result)) return; // overlapping sync: keep the visible notice
       setLastResult(result);
       // Replayed (or rejected) updates changed what the server holds.
       if (result.synced + result.dropped > 0) {
