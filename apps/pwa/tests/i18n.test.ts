@@ -15,7 +15,8 @@ import {
 import { statusLabel, stateLabel, eventLabel } from '../src/i18n/labels';
 import { loginErrorKey } from '../src/lib/password-login';
 import { translateMsg, msgOf, MsgError } from '../src/i18n';
-import { actionLabel, anyStateLabel } from '../src/i18n/labels';
+import { actionLabel, anyStateLabel, sourceLabel, incidentTypeLabel, incidentGroupLabel } from '../src/i18n/labels';
+import { formatDateTime, formatTime, localeFor } from '../src/i18n/format';
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const data = { ...initial };
@@ -254,5 +255,68 @@ describe('no hard-coded English in screen sources', () => {
   it.each(files)('%s has no literal user-facing strings', (f) => {
     const src = readFileSync(resolve(__dirname, '../src/routes', f), 'utf8');
     expect(hardcoded(src)).toEqual([]);
+  });
+});
+
+describe('source labels (City Help enums.source)', () => {
+  it('maps source codes per language and falls back to the raw code', () => {
+    expect(sourceLabel('PHONE', 'ms')).toBe('Telefon');
+    expect(sourceLabel('PHONE', 'en')).toBe('Phone');
+    expect(sourceLabel('WALK_IN', 'ms')).toBe('Hadir sendiri');
+    expect(sourceLabel('CITIZEN_PORTAL', 'en')).toBe('Citizen portal');
+    expect(sourceLabel('mobile', 'ms')).toBe('mobile');
+    expect(sourceLabel('constructor', 'ms')).toBe('constructor');
+  });
+});
+
+describe('incident type picker', () => {
+  const type = { code: 'TRF01', name: 'Pokok Tumbang', name_en: 'Fallen Tree' };
+  it('ms shows name, en shows name_en || name, both fall back to code', () => {
+    expect(incidentTypeLabel(type, 'ms')).toBe('Pokok Tumbang');
+    expect(incidentTypeLabel(type, 'en')).toBe('Fallen Tree');
+    expect(incidentTypeLabel({ ...type, name_en: null }, 'en')).toBe('Pokok Tumbang');
+    expect(incidentTypeLabel({ code: 'X1', name: '', name_en: null }, 'ms')).toBe('X1');
+    expect(incidentTypeLabel({ code: 'X1', name: '', name_en: null }, 'en')).toBe('X1');
+  });
+  it('translates known group types and keeps unknown ones raw', () => {
+    expect(incidentGroupLabel('TRF', 'ms')).toBe('Trafik');
+    expect(incidentGroupLabel('CTY', 'ms')).toBe('Perkhidmatan bandar');
+    expect(incidentGroupLabel('GOV', 'en')).toBe('Governance request');
+    expect(incidentGroupLabel('ZZZ', 'ms')).toBe('ZZZ');
+    expect(incidentGroupLabel(null, 'ms')).toBe('Lain-lain');
+  });
+});
+
+describe('date/time follow the app language', () => {
+  it('picks ms-MY / en-MY', () => {
+    expect(localeFor('ms')).toBe('ms-MY');
+    expect(localeFor('en')).toBe('en-MY');
+  });
+  it('formats with that locale and tolerates bad input', () => {
+    const iso = '2026-10-05T09:30:00Z';
+    expect(formatDateTime(iso, 'ms')).toBe(new Date(iso).toLocaleString('ms-MY', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }));
+    expect(formatDateTime(iso, 'ms')).not.toBe(formatDateTime(iso, 'en'));
+    expect(formatDateTime(null, 'ms')).toBe('');
+    expect(formatDateTime('nope', 'en')).toBe('');
+    expect(formatTime(iso, 'ms')).toBe(new Date(iso).toLocaleTimeString('ms-MY'));
+  });
+});
+
+describe('City Help aligned labels', () => {
+  it('uses Ulasan / Keutamaan / Status aliran kerja (and EN equivalents)', () => {
+    expect(ms['detail.comment']).toBe('Ulasan');
+    expect(ms['create.urgency']).toBe('Keutamaan');
+    expect(ms['detail.stage']).toBe('Status aliran kerja: {value}');
+    expect(en['detail.comment']).toBe('Comment');
+    expect(en['create.urgency']).toBe('Priority');
+    expect(en['detail.stage']).toBe('Workflow state: {value}');
+  });
+  it('wording fixes', () => {
+    expect(ms['gps.hoursAgo']).toBe('{n} jam lalu');
+    expect(ms['offline.syncing']).toBe('Menyegerakkan {pending} kemas kini dalam baris gilir…');
+    expect(ms['detail.slaDue']).toBe('Tarikh akhir {when}');
+    expect(ms['gps.timeout']).toBe('Gagal mendapatkan kedudukan GPS dalam masa yang ditetapkan — bergerak ke kawasan terbuka dan cuba lagi');
+    expect(ms['action.note.start']).toBe('Mula bertugas di lokasi');
+    expect(ms['detail.err.missingTicket']).toBe('Rujukan tiket tidak ditemui');
   });
 });

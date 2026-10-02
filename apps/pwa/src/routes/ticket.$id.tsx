@@ -19,7 +19,8 @@ import { ApiError, isOfflineError } from '../lib/api';
 import { enqueueMutation } from '../lib/offline-queue';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
 import { useLang } from '../i18n/react';
-import { statusLabel, stateLabel, eventLabel, anyStateLabel } from '../i18n/labels';
+import { statusLabel, stateLabel, eventLabel, anyStateLabel, sourceLabel } from '../i18n/labels';
+import { formatDateTime } from '../i18n/format';
 import { MsgError, msgOf, type Msg, type MessageKey } from '../i18n';
 
 const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
@@ -43,15 +44,6 @@ const ALL_STATUSES = ['OPEN', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED',
 interface PendingImage {
   file: File;
   preview: string;
-}
-
-function formatWhen(value: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString(undefined, {
-    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-  });
 }
 
 export function TicketDetailPage() {
@@ -244,7 +236,7 @@ export function TicketDetailPage() {
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, fontSize: 10, color: 'var(--ink-faint)', fontFamily: 'var(--font-label)' }}>
           {detail.workflow_state && <span>{t('detail.stage', { value: stateLabel(detail.workflow_state, lang) })}</span>}
-          {detail.source && <span>{t('detail.source', { value: detail.source })}</span>}
+          {detail.source && <span>{t('detail.source', { value: sourceLabel(detail.source, lang) })}</span>}
           {detail.assigned_to && <span>{t('detail.assigned', { value: detail.assigned_to })}</span>}
           {detail.jira_issue_key && <span>{t('detail.jira', { value: detail.jira_issue_key })}</span>}
         </div>
@@ -267,7 +259,7 @@ export function TicketDetailPage() {
             )}
             <span className="hud-label">{t('detail.sla')}</span>
             <span style={{ fontSize: 11, color: detail.sla_breached ? 'var(--danger)' : 'var(--ink-dim)', marginLeft: 'auto' }}>
-              {t(detail.sla_breached ? 'detail.slaBreached' : 'detail.slaDue', { when: formatWhen(detail.sla_deadline) })}
+              {t(detail.sla_breached ? 'detail.slaBreached' : 'detail.slaDue', { when: formatDateTime(detail.sla_deadline, lang) || '—' })}
             </span>
           </div>
         </div>
@@ -479,7 +471,7 @@ export function TicketDetailPage() {
                     {eventLabel(event.event_type, lang)}
                   </span>
                   <span style={{ fontSize: 10, color: 'var(--ink-faint)', flexShrink: 0 }}>
-                    {formatWhen(event.created_at)}
+                    {formatDateTime(event.created_at, lang) || '—'}
                   </span>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--ink-dim)', marginTop: 2 }}>

@@ -7,10 +7,11 @@ import { clockIn, clockOut, getAttendanceToday } from '../lib/help-api';
 import { getAccessToken } from '../lib/auth';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
 import { useLang } from '../i18n/react';
+import { formatTime } from '../i18n/format';
 import { MsgError, msgOf, type Msg } from '../i18n';
 
 export function AttendancePage() {
-  const { t, tm } = useLang();
+  const { t, tm, lang } = useLang();
   const navigate = useNavigate();
   const geo = useGeolocation({ auto: true });
   const [error, setError] = useState<Msg | null>(null);
@@ -113,10 +114,10 @@ export function AttendancePage() {
         {todayQuery.data && !todayQuery.isLoading && (
           <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--ink-dim)' }}>
             {todayQuery.data.clock_in && (
-              <p style={{ marginBottom: 4 }}>{t('att.clockInAt', { time: new Date(todayQuery.data.clock_in).toLocaleTimeString() })}</p>
+              <p style={{ marginBottom: 4 }}>{t('att.clockInAt', { time: formatTime(todayQuery.data.clock_in, lang) })}</p>
             )}
             {todayQuery.data.clock_out && (
-              <p>{t('att.clockOutAt', { time: new Date(todayQuery.data.clock_out).toLocaleTimeString() })}</p>
+              <p>{t('att.clockOutAt', { time: formatTime(todayQuery.data.clock_out, lang) })}</p>
             )}
           </div>
         )}

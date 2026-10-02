@@ -43,3 +43,26 @@ export function eventLabel(code: string, lang: Lang = getLang()): string {
     titleCase(code)
   );
 }
+
+/** Ticket source code (PHONE, WALK_IN, ...) -> City Help label; raw code if unknown. */
+export function sourceLabel(code: string, lang: Lang = getLang()): string {
+  return lookup('source', code, lang) ?? code;
+}
+
+interface IncidentTypeLike {
+  code: string;
+  name?: string | null;
+  name_en?: string | null;
+}
+
+/** DB `name` is BM, `name_en` is English. */
+export function incidentTypeLabel(type: IncidentTypeLike, lang: Lang = getLang()): string {
+  const label = lang === 'ms' ? type.name : type.name_en || type.name;
+  return label || type.code;
+}
+
+/** Incident-type group (TRF, CTY, ...) -> City Help domain term; raw if unknown, "Other" if missing. */
+export function incidentGroupLabel(group: string | null | undefined, lang: Lang = getLang()): string {
+  if (!group) return translate(lang, 'create.groupOther');
+  return lookup('group', group, lang) ?? group;
+}

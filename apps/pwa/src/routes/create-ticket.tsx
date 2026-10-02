@@ -7,6 +7,7 @@ import { createTicket, listIncidentTypes, uploadImage, type IncidentType } from 
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useLang } from '../i18n/react';
+import { incidentTypeLabel, incidentGroupLabel } from '../i18n/labels';
 import { MsgError, msgOf, type Msg, type MessageKey } from '../i18n';
 
 const URGENCY_KEYS: Record<'low' | 'medium' | 'high' | 'critical', MessageKey> = {
@@ -22,7 +23,7 @@ interface PendingImage {
 }
 
 export function CreateTicketPage() {
-  const { t, tm } = useLang();
+  const { t, tm, lang } = useLang();
   const navigate = useNavigate();
   const geo = useGeolocation({ auto: true });
   const online = useOnlineStatus();
@@ -42,7 +43,7 @@ export function CreateTicketPage() {
   });
 
   const groupedTypes = (incidentTypes || []).reduce<Record<string, IncidentType[]>>((acc, it) => {
-    const group = it.group_type || t('create.groupOther');
+    const group = it.group_type || '';
     (acc[group] = acc[group] || []).push(it);
     return acc;
   }, {});
@@ -193,9 +194,9 @@ export function CreateTicketPage() {
         >
           <option value="">{t('create.selectType')}</option>
           {Object.entries(groupedTypes).map(([group, types]) => (
-            <optgroup key={group} label={group}>
+            <optgroup key={group} label={incidentGroupLabel(group, lang)}>
               {types.map((it) => (
-                <option key={it.code} value={it.code}>{it.name_en || it.name || it.code}</option>
+                <option key={it.code} value={it.code}>{incidentTypeLabel(it, lang)}</option>
               ))}
             </optgroup>
           ))}

@@ -7,6 +7,7 @@ import { listTickets, type TicketListItem } from '../lib/help-api';
 import { getAccessToken } from '../lib/auth';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { formatDateTime } from '../i18n/format';
 import { useLang } from '../i18n/react';
 import { statusLabel } from '../i18n/labels';
 import type { MessageKey } from '../i18n';
@@ -28,18 +29,6 @@ const FILTERS: { id: string; labelKey: MessageKey; statuses?: string[] }[] = [
   { id: 'resolved', labelKey: 'tickets.filter.resolved', statuses: ['RESOLVED'] },
   { id: 'closed', labelKey: 'tickets.filter.closed', statuses: ['CLOSED'] },
 ];
-
-function formatWhen(value: string | null): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString(undefined, {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 
 export function TicketsPage() {
   const { t, lang } = useLang();
@@ -250,7 +239,7 @@ export function TicketsPage() {
                       {ticket.location_desc}
                     </span>
                   )}
-                  {ticket.created_at && <span>{formatWhen(ticket.created_at)}</span>}
+                  {ticket.created_at && <span>{formatDateTime(ticket.created_at, lang)}</span>}
                 </div>
               </Link>
             </li>
