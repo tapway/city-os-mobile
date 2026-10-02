@@ -14,7 +14,6 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "python-multipart>=0.0.9",
     "minio>=7.2.0",
-    "city-guard @ git+https://github.com/tapway/city-guard.git@main",
 ]
 
 [project.optional-dependencies]

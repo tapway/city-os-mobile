@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
+import { deleteImage } from '../lib/help-api';
 import {
   getQueue,
   syncQueue,
+  shouldRecord,
   QUEUE_CHANGED_EVENT,
   type SyncResult,
 } from '../lib/offline-queue';
+import { onSignedIn } from '../lib/auth';
 import { useOnlineStatus } from './useOnlineStatus';
 
 /**
@@ -16,6 +20,7 @@ import { useOnlineStatus } from './useOnlineStatus';
  */
 export function useOfflineSync() {
   const online = useOnlineStatus();
+  const queryClient = useQueryClient();
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [lastResult, setLastResult] = useState<SyncResult | null>(null);
@@ -32,13 +37,22 @@ export function useOfflineSync() {
     if (!navigator.onLine) return;
     setSyncing(true);
     try {
-      const result = await syncQueue((url, init) => apiFetch(url, init));
+      const result = await syncQueue((url, init) => apiFetch(url, init), {
+        deleteEvidence: deleteImage,
+      });
+      if (!shouldRecord(result)) return; // overlapping sync: keep the visible notice
       setLastResult(result);
+      // Replayed (or rejected) updates changed what the server holds.
+      if (result.synced + result.dropped > 0) {
+        void queryClient.invalidateQueries({ queryKey: ['ticket'] });
+        void queryClient.invalidateQueries({ queryKey: ['timeline'] });
+        void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      }
       await refreshCount();
     } finally {
       setSyncing(false);
     }
-  }, [refreshCount]);
+  }, [refreshCount, queryClient]);
 
   useEffect(() => {
     refreshCount();
@@ -53,6 +67,9 @@ export function useOfflineSync() {
     window.addEventListener(QUEUE_CHANGED_EVENT, onChange);
     return () => window.removeEventListener(QUEUE_CHANGED_EVENT, onChange);
   }, [refreshCount]);
+
+  // A 401 paused the queue; replay once the officer has signed in again.
+  useEffect(() => onSignedIn(() => void flush()), [flush]);
 
   // Replay as soon as the device is back online.
   useEffect(() => {

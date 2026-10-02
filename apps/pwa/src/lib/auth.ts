@@ -158,6 +158,40 @@ export async function hydrateUser(): Promise<SessionUser | null> {
   }
 }
 
+/**
+ * Session bootstrap, resolved once per page load and cached.
+ *
+ * Screens must not decide "signed out" from the in-memory token alone: after a
+ * reload or a phone waking up, the memory is empty but the HttpOnly refresh
+ * cookie may still be valid. Awaiting this first means a returning user lands
+ * straight on their tickets instead of being bounced to the login screen.
+ */
+let sessionPromise: Promise<boolean> | null = null;
+
+export function ensureSession(): Promise<boolean> {
+  if (!sessionPromise) sessionPromise = bootstrapSession();
+  return sessionPromise;
+}
+
+/**
+ * Replace the cached session check. Sign-in without a page reload (password
+ * login) must call markSignedIn(true), or route guards keep reusing the
+ * "signed out" answer cached before the user typed their password. Sign-out
+ * calls markSignedIn(false), which drops the cache so the next check asks again.
+ */
+export function markSignedIn(signedIn: boolean): void {
+  sessionPromise = signedIn ? Promise.resolve(true) : null;
+  if (signedIn) for (const listener of [...signedInListeners]) listener();
+}
+
+const signedInListeners = new Set<() => void>();
+
+/** Run `listener` after each sign-in without a reload (e.g. to resume a paused sync). Returns an unsubscribe. */
+export function onSignedIn(listener: () => void): () => void {
+  signedInListeners.add(listener);
+  return () => void signedInListeners.delete(listener);
+}
+
 export function initFromCallbackFragment(): boolean {
   const hash = window.location.hash.slice(1);
   if (!hash) return false;
@@ -207,6 +241,7 @@ export async function logout(): Promise<void> {
   } finally {
     await clearCachedResponses();
     clearAccessToken();
+    markSignedIn(false);
     window.location.href = '/login';
   }
 }

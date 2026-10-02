@@ -103,10 +103,11 @@ async def upload_evidence(
     authorization: str | None = Header(default=None),
 ):
     """Store one evidence photo and return the URL to attach to the ticket."""
+    # Authentication first: an anonymous caller gets 401 whatever the server's
+    # storage configuration is, and learns nothing about it.
+    token = _require_bearer(authorization)
     if not settings.uploads_enabled:
         raise HTTPException(503, "Image storage is not configured on this server")
-
-    token = _require_bearer(authorization)
     await _verify_token(token)
 
     content_type = (file.content_type or "").lower().split(";")[0].strip()

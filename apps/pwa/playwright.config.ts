@@ -24,6 +24,8 @@ export default defineConfig({
   projects: [
     {
       name: 'mobile-chrome',
+      // The deployed-stack UAT has its own project below (no resolver hack).
+      testIgnore: /uat-mobile\.spec\.ts/,
       use: {
         ...devices['Pixel 5'],
         // The `city-os` realm pins its frontendUrl to the Keycloak *container*
@@ -37,11 +39,23 @@ export default defineConfig({
         },
       },
     },
+    {
+      // Mobile UAT against a deployed stack (M7). Phone profile, real sign-in
+      // form, and deliberately NO --host-resolver-rules: it must prove a phone
+      // can sign in. Run with E2E_BASE_URL=<:9447 origin> --workers=1.
+      name: 'pixel7-uat',
+      testMatch: /uat-mobile\.spec\.ts/,
+      use: { ...devices['Pixel 7'] },
+    },
   ],
-  webServer: {
-    command: 'pnpm dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  // Only start the dev server when testing locally; a remote E2E_BASE_URL is
+  // an already-deployed stack.
+  webServer: /^https?:\/\/(localhost|127\.0\.0\.1)/.test(process.env.E2E_BASE_URL ?? 'http://localhost:5173')
+    ? {
+        command: 'pnpm dev',
+        url: 'http://localhost:5173',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      }
+    : undefined,
 });

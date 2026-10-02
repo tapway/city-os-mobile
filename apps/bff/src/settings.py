@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings
 
 
@@ -15,6 +17,14 @@ class Settings(BaseSettings):
     # arrives without the session cookie ("Cookie not found"). Leave empty to use
     # keycloak_url.
     keycloak_public_url: str = ""
+
+    # How the PWA signs a user in.
+    #   password: the PWA shows its own form and the BFF does the OAuth password
+    #             grant against keycloak_url (internal). No browser redirect to
+    #             Keycloak, so a phone never has to resolve its hostname.
+    #   pkce:     redirect to Keycloak's hosted page (needs a browser-reachable
+    #             keycloak_public_url).
+    auth_mode: Literal["password", "pkce"] = "password"
 
     # City Help API (proxied)
     city_help_api_url: str = "http://localhost:8001"

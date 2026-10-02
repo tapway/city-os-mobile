@@ -1,4 +1,6 @@
 import { openDB, type IDBPDatabase } from 'idb';
+import { ApiError } from './api';
+import type { Msg } from '../i18n';
 
 export interface QueuedMutation {
   id?: number;
@@ -72,6 +74,58 @@ export interface SyncResult {
   failed: number;
   /** Dropped because the server rejected them permanently (4xx). */
   dropped: number;
+  /** Set when a 401 paused the sync; `failed` then counts every entry still queued. */
+  authRequired?: true;
+  /** Set when another sync was already running; nothing was attempted. */
+  skipped?: true;
+}
+
+/** An overlapping sync did nothing, so its result must not replace the last real one. */
+export function shouldRecord(result: SyncResult): boolean {
+  return !result.skipped;
+}
+
+/** The ticket a queued request belongs to (…/tickets/{uid}/… or …/events/{uid}/…), else its URL. */
+function ticketKey(url: string): string {
+  const m = /\/(?:tickets|events)\/([^/?]+)/.exec(url);
+  return m ? m[1]! : url;
+}
+
+/** "Sign in again to send {n} pending update(s)", or null when the sync was not paused. */
+export function authNotice(result: SyncResult | null): Msg | null {
+  if (!result?.authRequired) return null;
+  return { key: 'offline.signInAgain', vars: { n: result.failed } };
+}
+
+/**
+ * What to do with a queued update that failed with `status` (0 = never reached the server).
+ *
+ * - `drop`: the server permanently rejected the content (4xx other than below).
+ * - `auth`: 401. The session is gone or expired, which says nothing about the
+ *   update; an officer can work offline longer than the refresh lifetime. Keep
+ *   everything and pause until they sign in again.
+ * - `retry`: 408, 429, 5xx and offline are transient.
+ */
+export function classifyFailure(status: number): 'drop' | 'retry' | 'auth' {
+  if (status === 401) return 'auth';
+  if (status === 408 || status === 429) return 'retry';
+  return status >= 400 && status < 500 ? 'drop' : 'retry';
+}
+
+/** The notice to show for a sync result, or null when nothing was rejected. */
+export function syncNotice(result: SyncResult | null): Msg | null {
+  if (!result || result.dropped <= 0) return null;
+  return { key: 'offline.dropped', vars: { n: result.dropped } };
+}
+
+export interface SyncOptions {
+  /** Remove an evidence object that a dropped update had already uploaded. */
+  deleteEvidence?: (url: string) => Promise<void>;
+}
+
+function evidenceOf(item: QueuedMutation): string[] {
+  const urls = (item.body as { image_urls?: unknown } | null)?.image_urls;
+  return Array.isArray(urls) ? urls.filter((u): u is string => typeof u === 'string') : [];
 }
 
 /** Flush guard so two triggers (reconnect + focus) never replay twice. */
@@ -84,14 +138,16 @@ export function isSyncing(): boolean {
 /**
  * Replay queued mutations through the provided auth-aware fetch.
  *
- * A 4xx is a permanent rejection — retrying forever would block the queue
- * behind a request that can never succeed — so those entries are dropped and
- * counted separately. 5xx and network errors stay queued for the next attempt.
+ * `apiFetch` throws an ApiError on any non-2xx (after its own 401 refresh), so
+ * failures arrive as exceptions as well as responses. See classifyFailure for
+ * what is dropped (counted separately, evidence cleaned up), what stays
+ * queued, and the 401 pause.
  */
 export async function syncQueue(
   fetchFn: (url: string, init: RequestInit) => Promise<Response>,
+  opts: SyncOptions = {},
 ): Promise<SyncResult> {
-  if (syncing) return { synced: 0, failed: 0, dropped: 0 };
+  if (syncing) return { synced: 0, failed: 0, dropped: 0, skipped: true };
   syncing = true;
   try {
     const queue = await getQueue();
@@ -99,24 +155,48 @@ export async function syncQueue(
     let failed = 0;
     let dropped = 0;
 
-    for (const item of queue) {
+    // Tickets with an entry that must be retried: later entries for them wait,
+    // in order, for the next sync (sending Start before a failed Accept would 409
+    // and the Start would be dropped).
+    const held = new Set<string>();
+
+    for (const [index, item] of queue.entries()) {
+      const key = ticketKey(item.url);
+      if (held.has(key)) {
+        failed++;
+        continue;
+      }
+      let status: number;
       try {
         const resp = await fetchFn(item.url, {
           method: item.method,
           body: JSON.stringify(item.body),
           headers: { 'Content-Type': 'application/json' },
         });
-        if (resp.ok && item.id !== undefined) {
-          await removeFromQueue(item.id);
+        if (resp.ok) {
+          if (item.id !== undefined) await removeFromQueue(item.id);
           synced++;
-        } else if (resp.status >= 400 && resp.status < 500 && item.id !== undefined) {
-          await removeFromQueue(item.id);
-          dropped++;
-        } else {
-          failed++;
+          continue;
         }
-      } catch {
+        status = resp.status;
+      } catch (err) {
+        status = err instanceof ApiError ? err.status : 0;
+      }
+
+      const outcome = classifyFailure(status);
+      if (outcome === 'auth') {
+        // Keep this and every later entry; the caller shows a sign-in prompt.
+        return { synced, failed: failed + (queue.length - index), dropped, authRequired: true };
+      }
+      if (item.id !== undefined && outcome === 'drop') {
+        await removeFromQueue(item.id);
+        dropped++;
+        if (opts.deleteEvidence) {
+          await Promise.all(evidenceOf(item).map((u) => opts.deleteEvidence!(u).catch(() => undefined)));
+        }
+      } else {
         failed++;
+        held.add(key);
       }
     }
 
