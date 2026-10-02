@@ -161,3 +161,73 @@ async def revoke_token(refresh_token: str) -> bool:
         except Exception as exc:
             logger.warning("Token revocation error: %s", exc)
             return False
+
+
+class PasswordGrantRejected(Exception):
+    """Keycloak refused the credentials or the account.
+
+    `reason` is "invalid_credentials" or "account_setup_required". The message
+    deliberately carries nothing from the request.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+async def password_grant(username: str, password: str, scope: str = "openid profile") -> dict:
+    """OAuth password grant against the INTERNAL token endpoint.
+
+    Returns the token payload. Raises PasswordGrantRejected for bad credentials
+    or an account with pending required actions, TransientAuthError for anything
+    that is the service's fault (unreachable, 5xx, misconfigured client).
+
+    Never logs the request body or the password: only status and error code.
+    """
+    data = {
+        "grant_type": "password",
+        "client_id": settings.keycloak_client_id,
+        "username": username,
+        "password": password,
+        "scope": scope,
+    }
+    if settings.keycloak_client_secret:
+        data["client_secret"] = settings.keycloak_client_secret
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{settings.keycloak_url}/protocol/openid-connect/token", data=data
+            )
+    except httpx.HTTPError as exc:
+        logger.warning("Password grant: Keycloak unreachable (%s)", type(exc).__name__)
+        raise TransientAuthError("Keycloak unreachable") from exc
+
+    if resp.status_code == 200:
+        try:
+            tokens = resp.json()
+        except ValueError as exc:
+            raise TransientAuthError("Keycloak returned a non-JSON token response") from exc
+        if "access_token" not in tokens:
+            raise TransientAuthError("Keycloak token response had no access_token")
+        return tokens
+
+    try:
+        body = resp.json()
+        error = str(body.get("error", ""))
+        description = str(body.get("error_description", ""))
+    except ValueError:
+        error = description = ""
+
+    if resp.status_code < 500 and error == "invalid_grant":
+        if "not fully set up" in description.lower():
+            logger.info("Password grant: account needs setup in Keycloak")
+            raise PasswordGrantRejected("account_setup_required")
+        logger.info("Password grant: invalid credentials")
+        raise PasswordGrantRejected("invalid_credentials")
+
+    # 5xx, or a 4xx that is not about the user (invalid_client,
+    # unauthorized_client: direct access grants off, wrong secret...). That is
+    # an operator problem, so it must not read as "wrong password".
+    logger.warning("Password grant failed: status=%s error=%s", resp.status_code, error[:60])
+    raise TransientAuthError(f"Keycloak token endpoint answered {resp.status_code}")

@@ -13,7 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 from .pkce import (
+    PasswordGrantRejected,
     TransientAuthError,
+    password_grant,
     build_auth_url,
     exchange_code_for_tokens,
     refresh_access_token,
@@ -136,7 +138,6 @@ async def callback(
         raise HTTPException(400, "Token exchange failed")
 
     access_token = tokens["access_token"]
-    refresh_token = tokens.get("refresh_token", "")
     expires_in = tokens.get("expires_in", settings.access_token_ttl_minutes * 60)
 
     # Redirect to the PWA with the access token in the fragment (never sent to
@@ -146,18 +147,7 @@ async def callback(
         status_code=302,
     )
 
-    if refresh_token:
-        response.set_cookie(
-            key="refresh_token",
-            value=refresh_token,
-            httponly=True,
-            max_age=settings.refresh_token_ttl_hours * 3600,
-            samesite="lax",
-            secure=settings.cookie_secure,
-            path="/",
-        )
-
-    _set_identity_cookie(response, tokens)
+    _set_session_cookies(response, tokens)
 
     # Clear the one-shot PKCE cookies
     response.delete_cookie("pkce_verifier", path="/")
@@ -217,6 +207,30 @@ def _set_identity_cookie(response: Response, tokens: dict) -> None:
     )
 
 
+def _set_refresh_cookie(response: Response, refresh_token: str | None) -> None:
+    if not refresh_token:
+        return
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        max_age=settings.refresh_token_ttl_hours * 3600,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        path="/",
+    )
+
+
+def _set_session_cookies(response: Response, tokens: dict) -> None:
+    """The session a successful sign-in establishes, whichever way it got here.
+
+    Shared by /auth/callback (PKCE) and /auth/password-login so both produce
+    identical cookies, flags and /auth/me results.
+    """
+    _set_refresh_cookie(response, tokens.get("refresh_token"))
+    _set_identity_cookie(response, tokens)
+
+
 def _token_response(access_token: str, expires_in: int, refresh_token: str | None) -> Response:
     """Serialise the token payload with json.dumps — never string interpolation.
 
@@ -229,16 +243,7 @@ def _token_response(access_token: str, expires_in: int, refresh_token: str | Non
         media_type="application/json",
         status_code=200,
     )
-    if refresh_token:
-        response.set_cookie(
-            key="refresh_token",
-            value=refresh_token,
-            httponly=True,
-            max_age=settings.refresh_token_ttl_hours * 3600,
-            samesite="lax",
-            secure=settings.cookie_secure,
-            path="/",
-        )
+    _set_refresh_cookie(response, refresh_token)
     return response
 
 
@@ -327,3 +332,92 @@ async def me(request: Request):
         return json.loads(raw)
     except ValueError:
         raise HTTPException(401, "Not signed in")
+
+
+
+@router.get("/config")
+async def auth_config():
+    """Which sign-in the PWA should offer: its own form ("password") or the
+    Keycloak redirect ("pkce")."""
+    return {"mode": settings.auth_mode}
+
+
+def _reject_foreign_origin(request: Request) -> None:
+    """Sign-in sets session cookies, so a cross-site page must not be able to
+    drive it. Browsers always send Origin on a cross-origin POST; a request with
+    none (curl, server-to-server) is not a browser CSRF vector and is allowed."""
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    if origin.strip().rstrip("/") not in settings.pwa_origins_list:
+        logger.warning("Rejected password login from origin %r (not in PWA_ORIGINS)", origin)
+        raise HTTPException(403, "Origin not allowed")
+
+
+def _credentials(payload: object) -> tuple[str, str]:
+    """Validate by hand: FastAPI's default 422 body echoes the offending input,
+    which here would put the password in the response."""
+    if not isinstance(payload, dict):
+        raise HTTPException(422, "Username and password are required")
+    username, password = payload.get("username"), payload.get("password")
+    if (
+        not isinstance(username, str)
+        or not isinstance(password, str)
+        or not username.strip()
+        or not password.strip()
+    ):
+        raise HTTPException(422, "Username and password are required")
+    return username.strip(), password
+
+
+@router.post(
+    "/password-login",
+    dependencies=[
+        Depends(
+            rate_limit(
+                "password-login",
+                limit=settings.rate_limit_login_per_minute,
+                window_seconds=60,
+            )
+        )
+    ],
+)
+async def password_login(request: Request):
+    """Sign in with a username and password (auth mode "password").
+
+    The BFF performs the OAuth password grant against the internal Keycloak
+    token endpoint and then establishes exactly the session /auth/callback
+    does. Response body: the /auth/me identity (sub, username, name, roles) plus
+    `access_token` and `expires_in`, so the PWA needs no follow-up call. The
+    refresh token stays in its HttpOnly cookie and is never in the body.
+    """
+    _reject_foreign_origin(request)
+    try:
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(422, "Username and password are required")
+    username, password = _credentials(payload)
+
+    try:
+        tokens = await password_grant(username, password)
+    except PasswordGrantRejected as rejected:
+        if rejected.reason == "account_setup_required":
+            raise HTTPException(
+                403,
+                "This account is not fully set up yet. It needs to be set up in Keycloak "
+                "(required actions pending) - ask an administrator.",
+            )
+        raise HTTPException(401, "Invalid username or password")
+    except TransientAuthError:
+        raise HTTPException(503, "Sign-in service unavailable - please retry")
+
+    body = {
+        **_identity_claims(tokens),
+        "access_token": tokens["access_token"],
+        "expires_in": tokens.get("expires_in", settings.access_token_ttl_minutes * 60),
+    }
+    response = Response(
+        content=json.dumps(body), media_type="application/json", status_code=200
+    )
+    _set_session_cookies(response, tokens)
+    return response
