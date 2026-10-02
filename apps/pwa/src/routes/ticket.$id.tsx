@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, MapPin, Clock, AlertTriangle, MessageSquare, Camera, X } from 'lucide-react';
@@ -8,20 +8,22 @@ import {
   getTimeline,
   statusUpdateRequest,
   updateTicketStatus,
+  runTicketAction,
   deleteImage,
   uploadImage,
   storageUrl,
-  type StatusUpdate,
   type TicketDetail,
 } from '../lib/help-api';
 import { getActor } from '../lib/auth';
 import { ApiError, isOfflineError } from '../lib/api';
 import { enqueueMutation } from '../lib/offline-queue';
+import { actionButtons, buildActionUpdate, type FieldAction } from '../lib/ticket-actions';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
 import { useLang } from '../i18n/react';
 import { statusLabel, stateLabel, eventLabel, anyStateLabel, sourceLabel } from '../i18n/labels';
 import { formatDateTime } from '../i18n/format';
-import { MsgError, msgOf, type Msg, type MessageKey } from '../i18n';
+import { MsgError, msgOf, type Msg } from '../i18n';
 
 const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
   OPEN: 'warning',
@@ -31,15 +33,6 @@ const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger
   RESOLVED: 'success',
   CLOSED: 'default',
 };
-
-/** Field-officer shortcuts: label → the status they move the ticket to. */
-const QUICK_ACTIONS: { labelKey: MessageKey; noteKey: MessageKey; status: string }[] = [
-  { labelKey: 'act.start', noteKey: 'action.note.start', status: 'IN_PROGRESS' },
-  { labelKey: 'action.resolve', noteKey: 'action.note.resolve', status: 'RESOLVED' },
-  { labelKey: 'act.close', noteKey: 'action.note.close', status: 'CLOSED' },
-];
-
-const ALL_STATUSES = ['OPEN', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
 
 interface PendingImage {
   file: File;
@@ -52,8 +45,8 @@ export function TicketDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const geo = useGeolocation({ auto: true });
+  const online = useOnlineStatus();
 
-  const [status, setStatus] = useState('');
   const [comment, setComment] = useState('');
   const [images, setImages] = useState<PendingImage[]>([]);
   const [formError, setFormError] = useState<Msg | null>(null);
@@ -77,34 +70,33 @@ export function TicketDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const currentStatus = ticket?.status ?? '';
-  const statusOptions = useMemo(
-    () => ALL_STATUSES.filter((s) => s !== currentStatus),
-    [currentStatus],
-  );
-
   const updateMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (action: FieldAction) => {
       if (!ticketUid) throw new MsgError('detail.err.missingTicket');
-      if (!status) throw new MsgError('detail.err.chooseStatus');
+      if (action === 'need_support') {
+        // No status mapping and not queueable: it is a workflow event, online only.
+        if (!online) throw new MsgError('detail.err.needOnline');
+        await runTicketAction(ticketUid, action, comment.trim() || undefined);
+        return 'support' as const;
+      }
       if (!geo.isFresh || typeof geo.lat !== 'number' || typeof geo.lng !== 'number') {
         throw new MsgError('detail.err.needGps');
       }
 
+      const noteKey = actionButtons([{ action }])[0]?.noteKey ?? null;
+
       // Upload evidence first so a failed upload never leaves a half-written update.
       const uploaded = await Promise.all(images.map((i) => uploadImage(i.file, ticketUid)));
 
-      const request: StatusUpdate = {
-        status,
+      // buildActionUpdate stamps a fresh client_request_id: a queued replay
+      // carries the same key and the server applies it once.
+      const request = buildActionUpdate(action, {
         actor: getActor(),
-        note: comment.trim() || undefined,
+        note: comment.trim() || (noteKey ? t(noteKey) : undefined),
         lat: geo.lat,
         lng: geo.lng,
         image_urls: uploaded.map((u) => u.url),
-        // One key per logical update: a queued replay, or the officer pressing
-        // save again, carries the same key and the server applies it once.
-        client_request_id: crypto.randomUUID(),
-      };
+      });
 
       try {
         return await updateTicketStatus(ticketUid, request);
@@ -125,16 +117,23 @@ export function TicketDetailPage() {
         // re-serialised after the fact.
         const { path, body } = statusUpdateRequest(ticketUid, request);
         await enqueueMutation({ url: path, method: 'PATCH', body });
-        return null;
+        return 'queued' as const;
       }
     },
     onSuccess: (saved) => {
       setComment('');
       images.forEach((i) => URL.revokeObjectURL(i.preview));
       setImages([]);
-      setStatus('');
       setFormError(null);
-      setNotice(msgOf(saved === null ? 'detail.notice.queued' : 'detail.notice.saved'));
+      setNotice(
+        msgOf(
+          saved === 'queued'
+            ? 'detail.notice.queued'
+            : saved === 'support'
+              ? 'detail.notice.supportRequested'
+              : 'detail.notice.saved',
+        ),
+      );
       queryClient.invalidateQueries({ queryKey: ['ticket', ticketUid] });
       queryClient.invalidateQueries({ queryKey: ['timeline', ticketUid] });
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
@@ -200,6 +199,7 @@ export function TicketDetailPage() {
   }
 
   const detail: TicketDetail = ticket;
+  const buttons = actionButtons(detail.available_actions);
   const gpsLabel = geo.fix
     ? `${geo.fix.lat.toFixed(6)}, ${geo.fix.lng.toFixed(6)}${geo.accuracy ? ` (±${Math.round(geo.accuracy)} m)` : ''} · ${formatFixAge(geo.ageMs)}`
     : t('detail.gpsNone');
@@ -310,7 +310,7 @@ export function TicketDetailPage() {
       )}
 
       {/* Update form */}
-      {!['CLOSED'].includes(detail.status) && (
+      {buttons.length > 0 && (
         <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
           <h2 className="hud-label" style={{ marginBottom: 10 }}>{t('detail.updateTitle')}</h2>
 
@@ -326,7 +326,7 @@ export function TicketDetailPage() {
             <span style={{ fontSize: 11, color: geo.isFresh ? 'var(--ink)' : 'var(--ink-dim)', flex: 1 }}>
               {gpsLabel}
             </span>
-            <Button onClick={() => geo.getPosition()} variant="outline" size="sm" disabled={geo.loading}>
+            <Button data-testid="ticket-gps-get" onClick={() => geo.getPosition()} variant="outline" size="sm" disabled={geo.loading}>
               {geo.loading ? t('detail.gpsLocating') : t('detail.gpsGet')}
             </Button>
           </div>
@@ -338,49 +338,6 @@ export function TicketDetailPage() {
               {t('detail.gpsHint')}
             </p>
           )}
-
-          {/* Quick actions */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-            {QUICK_ACTIONS.filter((a) => a.status !== currentStatus).map((action) => (
-              <button
-                key={action.status}
-                type="button"
-                onClick={() => {
-                  setStatus(action.status);
-                  setComment((prev) => prev || t(action.noteKey));
-                }}
-                style={{
-                  padding: '7px 11px', fontSize: 10, fontFamily: 'var(--font-label)',
-                  textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', borderRadius: 2,
-                  border: `1px solid ${status === action.status ? 'var(--cyan)' : 'var(--border)'}`,
-                  background: status === action.status ? 'rgba(61,232,255,0.1)' : 'transparent',
-                  color: status === action.status ? 'var(--cyan)' : 'var(--ink-dim)',
-                }}
-              >
-                {t(action.labelKey)}
-              </button>
-            ))}
-          </div>
-
-          {/* Status */}
-          <label htmlFor="update-status" className="hud-label" style={{ display: 'block', marginBottom: 6 }}>
-            {t('detail.newStatus')}
-          </label>
-          <select
-            id="update-status"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            style={{
-              width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
-              borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-              fontFamily: 'var(--font-body)', marginBottom: 10,
-            }}
-          >
-            <option value="">{t('detail.selectStatus')}</option>
-            {statusOptions.map((s) => (
-              <option key={s} value={s}>{statusLabel(s, lang)}</option>
-            ))}
-          </select>
 
           {/* Comment */}
           <label htmlFor="update-comment" className="hud-label" style={{ display: 'block', marginBottom: 6 }}>
@@ -400,7 +357,7 @@ export function TicketDetailPage() {
 
           {/* Evidence */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Button onClick={handleCapture} variant="outline" size="sm">
+            <Button data-testid="ticket-add-photo" onClick={handleCapture} variant="outline" size="sm">
               <Camera size={14} /> {t('detail.addPhoto')}
             </Button>
             <span style={{ fontSize: 10, color: 'var(--ink-faint)' }}>
@@ -440,14 +397,28 @@ export function TicketDetailPage() {
             <p role="status" style={{ color: 'var(--safe, #34d399)', fontSize: 11, marginBottom: 8 }}>{tm(notice)}</p>
           )}
 
-          <Button
-            onClick={() => updateMutation.mutate()}
-            disabled={!status || !geo.isFresh || updateMutation.isPending}
-            size="md"
-            style={{ width: '100%' }}
-          >
-            {updateMutation.isPending ? t('detail.saving') : t('detail.save')}
-          </Button>
+          {/* Actions offered by the server for this ticket */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {buttons.map((b) => {
+              const blocked = b.needsOnline ? !online : !geo.isFresh;
+              return (
+                <Button
+                  key={b.action}
+                  data-testid={b.testId}
+                  onClick={() => updateMutation.mutate(b.action)}
+                  disabled={blocked || updateMutation.isPending}
+                  variant={b.action === 'need_support' ? 'outline' : undefined}
+                  size="md"
+                  style={{ flex: '1 1 40%' }}
+                >
+                  {updateMutation.isPending && updateMutation.variables === b.action ? t('detail.saving') : t(b.labelKey)}
+                </Button>
+              );
+            })}
+          </div>
+          {buttons.some((b) => b.needsOnline) && !online && (
+            <p style={{ color: 'var(--ink-faint)', fontSize: 11, marginTop: 8 }}>{t('detail.needSupportOffline')}</p>
+          )}
         </div>
       )}
 

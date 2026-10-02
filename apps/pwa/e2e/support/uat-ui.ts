@@ -8,7 +8,7 @@
  *   tickets-filter-mine            the "Mine" filter chip on /tickets
  *   ticket-card                    (exists) one card per ticket
  *   ticket-gps-get                 the "Get GPS" button on /tickets/$id
- *   ticket-action-accept|start|complete   action buttons from available_actions
+ *   ticket-action-accept|start|resume|complete|need_support   action buttons from available_actions
  *   ticket-add-photo               the "Add photo" button (opens a file chooser)
  */
 import { expect, type Page } from '@playwright/test';
@@ -20,7 +20,7 @@ export const ids = {
   card: 'ticket-card',
   gps: 'ticket-gps-get',
   addPhoto: 'ticket-add-photo',
-  action: (name: 'accept' | 'start' | 'complete') => `ticket-action-${name}`,
+  action: (name: 'accept' | 'start' | 'resume' | 'complete' | 'need_support') => `ticket-action-${name}`,
 } as const;
 
 /** Sign in through the in-app form (never the Keycloak redirect) as `engineer`. */

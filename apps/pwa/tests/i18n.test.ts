@@ -172,7 +172,7 @@ describe('messages stored as key + vars', () => {
   });
 
   it('MsgError keeps the key; foreign errors pass the server text through', () => {
-    expect(msgOf(new MsgError('detail.err.chooseStatus'))).toEqual({ key: 'detail.err.chooseStatus' });
+    expect(msgOf(new MsgError('detail.err.needOnline'))).toEqual({ key: 'detail.err.needOnline' });
     expect(translateMsg('ms', msgOf(new Error('Boom from server')))).toBe('Boom from server');
   });
 

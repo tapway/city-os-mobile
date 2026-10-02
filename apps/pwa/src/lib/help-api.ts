@@ -52,6 +52,8 @@ export interface TicketDetail extends TicketListItem {
   resolved_at: string | null;
   closed_at: string | null;
   sla_timers?: unknown;
+  /** Server-computed; entries are objects with an `action` key (see ticket-actions.ts). */
+  available_actions?: { action: string; label?: string }[];
 }
 
 /** The list endpoint returns an envelope, never a bare array. */
@@ -182,6 +184,18 @@ export function statusUpdateRequest(
 export async function updateTicketStatus(uid: string, update: StatusUpdate): Promise<TicketDetail> {
   const { path, body } = statusUpdateRequest(uid, update);
   return apiJson<TicketDetail>(path, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export function actionPath(uid: string, action: string): string {
+  return `/api/v1/events/${encodeURIComponent(uid)}/actions/${encodeURIComponent(action)}`;
+}
+
+/** Run a workflow action that has no status mapping (e.g. need_support). Online only. */
+export async function runTicketAction(uid: string, action: string, comment?: string): Promise<TicketDetail> {
+  return apiJson<TicketDetail>(actionPath(uid, action), {
+    method: 'POST',
+    body: JSON.stringify(comment ? { comment } : {}),
+  });
 }
 
 export interface CreateTicketBody {
