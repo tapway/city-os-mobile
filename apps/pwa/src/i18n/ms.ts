@@ -70,6 +70,7 @@ export const ms: Record<MessageKey, string> = {
   'tickets.searchPlaceholder': 'Tajuk, cth. lubang jalan atau Jalan Meldrum',
   'tickets.searchClear': 'Kosongkan carian',
   'tickets.filterAria': 'Tapis mengikut status',
+  'tickets.filter.mine': 'Tugasan saya',
   'tickets.filter.all': 'Semua',
   'tickets.filter.open': 'Terbuka',
   'tickets.filter.assigned': 'Ditugaskan',
@@ -79,6 +80,7 @@ export const ms: Record<MessageKey, string> = {
   'tickets.loadError': 'Tiket tidak dapat dimuatkan: {message}',
   'tickets.retry': 'Cuba lagi',
   'tickets.emptySearch': 'Tiada tiket sepadan dengan “{query}”.',
+  'tickets.emptyMine': 'Tiada tiket ditugaskan kepada anda.',
   'tickets.emptyFilter': 'Tiada tiket berstatus {status}.',
   'tickets.empty': 'Tiada tiket untuk dipaparkan.',
 

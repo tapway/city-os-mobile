@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { Search, RefreshCw, MapPin, X } from 'lucide-react';
 import { Badge } from '@city-os/ui';
 import { listTickets, type TicketListItem } from '../lib/help-api';
-import { getAccessToken } from '../lib/auth';
+import { getAccessToken, getSessionUser } from '../lib/auth';
+import { defaultTicketFilter } from '../lib/ticket-filters';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateTime } from '../i18n/format';
@@ -21,7 +22,8 @@ const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger
   CLOSED: 'default',
 };
 
-const FILTERS: { id: string; labelKey: MessageKey; statuses?: string[] }[] = [
+const FILTERS: { id: string; labelKey: MessageKey; statuses?: string[]; assignee?: 'me' }[] = [
+  { id: 'mine', labelKey: 'tickets.filter.mine', assignee: 'me' },
   { id: 'all', labelKey: 'tickets.filter.all' },
   { id: 'open', labelKey: 'tickets.filter.open', statuses: ['OPEN'] },
   { id: 'assigned', labelKey: 'tickets.filter.assigned', statuses: ['ASSIGNED', 'VERIFIED'] },
@@ -35,9 +37,11 @@ export function TicketsPage() {
   const navigate = useNavigate();
   const online = useOnlineStatus();
   const [search, setSearch] = useState('');
-  const [filterIndex, setFilterIndex] = useState(0);
+  // null = the user has not chosen: Mine for handling staff, All for others.
+  const [chosenFilter, setChosenFilter] = useState<string | null>(null);
   const debouncedSearch = useDebouncedValue(search, 300);
-  const activeFilter = FILTERS[filterIndex] ?? FILTERS[0]!;
+  const activeId = chosenFilter ?? defaultTicketFilter(getSessionUser()?.roles);
+  const activeFilter = FILTERS.find((f) => f.id === activeId) ?? FILTERS[0]!;
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -51,6 +55,7 @@ export function TicketsPage() {
       listTickets({
         q: debouncedSearch,
         status: activeFilter.statuses,
+        assignee: activeFilter.assignee,
         limit: 50,
       }),
     enabled: !!getAccessToken(),
@@ -144,18 +149,19 @@ export function TicketsPage() {
         aria-label={t('tickets.filterAria')}
         style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 4 }}
       >
-        {FILTERS.map((f, i) => (
+        {FILTERS.map((f) => (
           <button
             key={f.id}
             type="button"
-            onClick={() => setFilterIndex(i)}
-            aria-pressed={i === filterIndex}
+            onClick={() => setChosenFilter(f.id)}
+            data-testid={`tickets-filter-${f.id}`}
+            aria-pressed={f.id === activeFilter.id}
             style={{
               flexShrink: 0, padding: '6px 12px', fontSize: 10, fontFamily: 'var(--font-label)',
               textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', borderRadius: 2,
-              border: `1px solid ${i === filterIndex ? 'var(--cyan)' : 'var(--border)'}`,
-              background: i === filterIndex ? 'rgba(61,232,255,0.1)' : 'transparent',
-              color: i === filterIndex ? 'var(--cyan)' : 'var(--ink-dim)',
+              border: `1px solid ${f.id === activeFilter.id ? 'var(--cyan)' : 'var(--border)'}`,
+              background: f.id === activeFilter.id ? 'rgba(61,232,255,0.1)' : 'transparent',
+              color: f.id === activeFilter.id ? 'var(--cyan)' : 'var(--ink-dim)',
             }}
           >
             {t(f.labelKey)}
@@ -203,7 +209,9 @@ export function TicketsPage() {
           <p style={{ color: 'var(--ink-dim)', fontSize: 13, textAlign: 'center' }}>
             {searching
               ? t('tickets.emptySearch', { query: debouncedSearch.trim() })
-              : activeFilter.statuses
+              : activeFilter.assignee
+                ? t('tickets.emptyMine')
+                : activeFilter.statuses
                 ? t('tickets.emptyFilter', { status: t(activeFilter.labelKey).toLowerCase() })
                 : t('tickets.empty')}
           </p>

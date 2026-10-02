@@ -76,6 +76,7 @@ export const en = {
   'tickets.searchPlaceholder': 'Title, e.g. pothole or Jalan Meldrum',
   'tickets.searchClear': 'Clear search',
   'tickets.filterAria': 'Filter by status',
+  'tickets.filter.mine': 'Mine',
   'tickets.filter.all': 'All',
   'tickets.filter.open': 'Open',
   'tickets.filter.assigned': 'Assigned',
@@ -85,6 +86,7 @@ export const en = {
   'tickets.loadError': 'Could not load tickets: {message}',
   'tickets.retry': 'Try again',
   'tickets.emptySearch': 'No tickets match “{query}”.',
+  'tickets.emptyMine': 'No tickets are assigned to you.',
   'tickets.emptyFilter': 'No tickets with status {status}.',
   'tickets.empty': 'No tickets to show.',
 

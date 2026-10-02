@@ -68,21 +68,28 @@ export interface ListTicketsParams {
   source?: string;
   incident_type?: string;
   lane?: string;
+  /** `me` = tickets assigned to the caller (server resolves the identity). */
+  assignee?: 'me';
   limit?: number;
   offset?: number;
 }
 
-export async function listTickets(params: ListTicketsParams = {}): Promise<TicketPage> {
+/** Query string for the event list, as data so it can be unit-tested. */
+export function listTicketsQuery(params: ListTicketsParams = {}): string {
   const search = new URLSearchParams();
   if (params.q?.trim()) search.set('q', params.q.trim());
   if (params.status?.length) search.set('status', params.status.join(','));
   if (params.source) search.set('source', params.source);
   if (params.incident_type) search.set('incident_type', params.incident_type);
   if (params.lane) search.set('lane', params.lane);
+  if (params.assignee) search.set('assignee', params.assignee);
   search.set('limit', String(params.limit ?? 25));
   search.set('offset', String(params.offset ?? 0));
+  return search.toString();
+}
 
-  const page = await apiJson<TicketPage>(`/api/v1/events?${search.toString()}`);
+export async function listTickets(params: ListTicketsParams = {}): Promise<TicketPage> {
+  const page = await apiJson<TicketPage>(`/api/v1/events?${listTicketsQuery(params)}`);
   // Defensive: older deployments returned a bare array.
   if (Array.isArray(page)) {
     const items = page as unknown as TicketListItem[];
