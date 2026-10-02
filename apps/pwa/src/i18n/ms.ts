@@ -18,6 +18,8 @@ export const ms: Record<MessageKey, string> = {
   'offline.syncing': 'Menyegerakkan {pending} kemas kini dalam baris gilir…',
   'offline.dropped': '{n} kemas kini luar talian ditolak oleh pelayan — tiket telah berubah. Sila semak tiket tersebut.',
   'detail.err.stale': 'Tiket ini telah berubah. Telah dimuat semula — sila semak tindakan yang tersedia.',
+  'offline.signInAgain': 'Log masuk semula untuk menghantar {n} kemas kini yang menunggu',
+  'offline.signInLink': 'Log masuk',
   'offline.waiting': '{pending} kemas kini menunggu untuk disegerakkan',
   'offline.banner': 'Luar talian — kemas kini akan disegerakkan apabila anda bersambung semula',
   'offline.listNotice': 'Anda luar talian — memaparkan senarai yang dimuatkan terakhir.',

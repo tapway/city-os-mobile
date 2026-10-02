@@ -3,24 +3,37 @@ import 'fake-indexeddb/auto';
 import {
   classifyFailure,
   syncNotice,
+  authNotice,
   syncQueue,
   enqueueMutation,
   getQueue,
   clearQueue,
 } from '../src/lib/offline-queue';
 import { ApiError } from '../src/lib/api';
+import { onSignedIn, markSignedIn } from '../src/lib/auth';
 import { staleConflictMessage } from '../src/lib/ticket-actions';
 
 describe('classifyFailure: drop or retry', () => {
-  it.each([400, 403, 404, 409, 410, 422])('drops %i', (s) => {
+  it.each([400, 403, 404, 409, 410, 422, 499])('drops %i', (s) => {
     expect(classifyFailure(s)).toBe('drop');
   });
   it.each([0, 408, 429, 500, 502, 503])('retries %i', (s) => {
     expect(classifyFailure(s)).toBe('retry');
   });
-  it('retries a 401 until the token has been refreshed, then drops it', () => {
-    expect(classifyFailure(401, { refreshed: false })).toBe('retry');
-    expect(classifyFailure(401, { refreshed: true })).toBe('drop');
+  it('pauses for sign-in on 401, whether or not a refresh was tried', () => {
+    expect(classifyFailure(401)).toBe('auth');
+  });
+});
+
+describe('authNotice', () => {
+  it('asks to sign in with the pending count when paused', () => {
+    expect(authNotice({ synced: 0, failed: 3, dropped: 0, authRequired: true })).toEqual({
+      key: 'offline.signInAgain', vars: { n: 3 },
+    });
+  });
+  it('is null otherwise', () => {
+    expect(authNotice({ synced: 1, failed: 1, dropped: 0 })).toBeNull();
+    expect(authNotice(null)).toBeNull();
   });
 });
 
@@ -75,10 +88,41 @@ describe('syncQueue failure handling', () => {
     expect(await getQueue()).toHaveLength(1);
   });
 
-  it('drops a 401 that persisted after apiFetch refreshed the token', async () => {
+  it('401 pauses the sync and keeps every entry, evidence included', async () => {
+    await queue(['/api/uploads/a.png']);
+    await queue(['/api/uploads/b.png']);
     await queue();
-    const res = await syncQueue(async () => { throw new ApiError(401, 'Session expired'); });
-    expect(res.dropped).toBe(1);
+    const del = vi.fn();
+    const fetchFn = vi.fn(async () => { throw new ApiError(401, 'Session expired'); });
+    const res = await syncQueue(fetchFn, { deleteEvidence: del });
+    expect(res).toEqual({ synced: 0, failed: 3, dropped: 0, authRequired: true });
+    expect(fetchFn).toHaveBeenCalledTimes(1); // paused, not hammering the server
+    expect(del).not.toHaveBeenCalled();
+    expect(await getQueue()).toHaveLength(3);
+  });
+
+  it('a bare 401 response pauses too', async () => {
+    await queue();
+    const res = await syncQueue(async () => new Response('', { status: 401 }));
+    expect(res).toMatchObject({ dropped: 0, authRequired: true });
+    expect(await getQueue()).toHaveLength(1);
+  });
+
+  it('after sign-in the paused entries replay and sync', async () => {
+    await queue();
+    await queue();
+    await syncQueue(async () => { throw new ApiError(401, 'x'); });
+    const flush = vi.fn(() => syncQueue(async () => new Response('{}', { status: 200 })));
+    const off = onSignedIn(() => void flush());
+    markSignedIn(true);
+    await flush.mock.results[0]!.value;
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(await getQueue()).toHaveLength(0);
+    markSignedIn(false); // sign-out does not trigger a sync
+    expect(flush).toHaveBeenCalledTimes(1);
+    off();
+    markSignedIn(true);
+    expect(flush).toHaveBeenCalledTimes(1);
   });
 
   it('still counts a successful replay and survives an evidence-delete failure', async () => {

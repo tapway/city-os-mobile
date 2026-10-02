@@ -19,6 +19,8 @@ export const en = {
   'offline.syncing': 'Syncing {pending} queued update(s)…',
   'offline.dropped': '{n} offline update(s) were rejected by the server — the ticket has changed. Please check it.',
   'detail.err.stale': 'This ticket has changed. Refreshed — please check the available actions.',
+  'offline.signInAgain': 'Sign in again to send {n} pending update(s)',
+  'offline.signInLink': 'Sign in',
   'offline.waiting': '{pending} update(s) waiting to sync',
   'offline.banner': 'Offline — updates will sync when you reconnect',
   'offline.listNotice': 'You are offline — showing the last loaded list.',

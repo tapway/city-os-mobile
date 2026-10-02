@@ -74,17 +74,27 @@ export interface SyncResult {
   failed: number;
   /** Dropped because the server rejected them permanently (4xx). */
   dropped: number;
+  /** Set when a 401 paused the sync; `failed` then counts every entry still queued. */
+  authRequired?: true;
+}
+
+/** "Sign in again to send {n} pending update(s)", or null when the sync was not paused. */
+export function authNotice(result: SyncResult | null): Msg | null {
+  if (!result?.authRequired) return null;
+  return { key: 'offline.signInAgain', vars: { n: result.failed } };
 }
 
 /**
- * Drop or retry a queued update that failed with `status` (0 = never reached the server).
+ * What to do with a queued update that failed with `status` (0 = never reached the server).
  *
- * Only a permanent rejection of the content is dropped. 408 and 429 are
- * transient. A 401 is retried until the auth layer has refreshed the token; one
- * that persists after the refresh will not fix itself, so it is dropped.
+ * - `drop`: the server permanently rejected the content (4xx other than below).
+ * - `auth`: 401. The session is gone or expired, which says nothing about the
+ *   update; an officer can work offline longer than the refresh lifetime. Keep
+ *   everything and pause until they sign in again.
+ * - `retry`: 408, 429, 5xx and offline are transient.
  */
-export function classifyFailure(status: number, opts: { refreshed?: boolean } = {}): 'drop' | 'retry' {
-  if (status === 401) return opts.refreshed ? 'drop' : 'retry';
+export function classifyFailure(status: number): 'drop' | 'retry' | 'auth' {
+  if (status === 401) return 'auth';
   if (status === 408 || status === 429) return 'retry';
   return status >= 400 && status < 500 ? 'drop' : 'retry';
 }
@@ -117,8 +127,8 @@ export function isSyncing(): boolean {
  *
  * `apiFetch` throws an ApiError on any non-2xx (after its own 401 refresh), so
  * failures arrive as exceptions as well as responses. See classifyFailure for
- * what is dropped (counted separately, evidence cleaned up) and what stays
- * queued for the next attempt.
+ * what is dropped (counted separately, evidence cleaned up), what stays
+ * queued, and the 401 pause.
  */
 export async function syncQueue(
   fetchFn: (url: string, init: RequestInit) => Promise<Response>,
@@ -132,11 +142,8 @@ export async function syncQueue(
     let failed = 0;
     let dropped = 0;
 
-    for (const item of queue) {
-      // A thrown ApiError has already been through apiFetch's refresh; a bare
-      // response has not.
+    for (const [index, item] of queue.entries()) {
       let status: number;
-      let refreshed = false;
       try {
         const resp = await fetchFn(item.url, {
           method: item.method,
@@ -151,10 +158,14 @@ export async function syncQueue(
         status = resp.status;
       } catch (err) {
         status = err instanceof ApiError ? err.status : 0;
-        refreshed = err instanceof ApiError;
       }
 
-      if (item.id !== undefined && classifyFailure(status, { refreshed }) === 'drop') {
+      const outcome = classifyFailure(status);
+      if (outcome === 'auth') {
+        // Keep this and every later entry; the caller shows a sign-in prompt.
+        return { synced, failed: failed + (queue.length - index), dropped, authRequired: true };
+      }
+      if (item.id !== undefined && outcome === 'drop') {
         await removeFromQueue(item.id);
         dropped++;
         if (opts.deleteEvidence) {

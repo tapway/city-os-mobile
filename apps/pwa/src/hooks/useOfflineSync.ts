@@ -8,6 +8,7 @@ import {
   QUEUE_CHANGED_EVENT,
   type SyncResult,
 } from '../lib/offline-queue';
+import { onSignedIn } from '../lib/auth';
 import { useOnlineStatus } from './useOnlineStatus';
 
 /**
@@ -64,6 +65,9 @@ export function useOfflineSync() {
     window.addEventListener(QUEUE_CHANGED_EVENT, onChange);
     return () => window.removeEventListener(QUEUE_CHANGED_EVENT, onChange);
   }, [refreshCount]);
+
+  // A 401 paused the queue; replay once the officer has signed in again.
+  useEffect(() => onSignedIn(() => void flush()), [flush]);
 
   // Replay as soon as the device is back online.
   useEffect(() => {

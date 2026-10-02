@@ -181,6 +181,15 @@ export function ensureSession(): Promise<boolean> {
  */
 export function markSignedIn(signedIn: boolean): void {
   sessionPromise = signedIn ? Promise.resolve(true) : null;
+  if (signedIn) for (const listener of [...signedInListeners]) listener();
+}
+
+const signedInListeners = new Set<() => void>();
+
+/** Run `listener` after each sign-in without a reload (e.g. to resume a paused sync). Returns an unsubscribe. */
+export function onSignedIn(listener: () => void): () => void {
+  signedInListeners.add(listener);
+  return () => void signedInListeners.delete(listener);
 }
 
 export function initFromCallbackFragment(): boolean {

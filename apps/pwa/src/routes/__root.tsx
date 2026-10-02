@@ -3,7 +3,7 @@ import { List, Clock, Plus, LogOut } from 'lucide-react';
 import { logout } from '../lib/auth';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useOfflineSync } from '../hooks/useOfflineSync';
-import { syncNotice } from '../lib/offline-queue';
+import { authNotice, syncNotice } from '../lib/offline-queue';
 import { useLang } from '../i18n/react';
 import { LanguageToggle } from '../i18n/LanguageToggle';
 
@@ -28,6 +28,7 @@ export function RootLayout() {
   const online = useOnlineStatus();
   const { pending, syncing, lastResult } = useOfflineSync();
   const droppedNotice = syncNotice(lastResult);
+  const signInNotice = authNotice(lastResult);
   const isLogin = location.pathname === '/login';
   const isActive = (path: string) =>
     path === '/tickets'
@@ -72,6 +73,20 @@ export function RootLayout() {
         </header>
       )}
       <main className="app-content">
+        {!isLogin && signInNotice && (
+          <div
+            role="alert"
+            style={{
+              padding: '8px 16px', background: 'rgba(239,68,68,0.12)', borderBottom: '1px solid var(--border)',
+              fontSize: 12, color: 'var(--danger)', display: 'flex', gap: 8, alignItems: 'center',
+            }}
+          >
+            <span style={{ flex: 1 }}>{tm(signInNotice)}</span>
+            <Link to="/login" style={{ color: 'var(--cyan)', fontFamily: 'var(--font-label)', textTransform: 'uppercase' }}>
+              {t('offline.signInLink')}
+            </Link>
+          </div>
+        )}
         {!isLogin && droppedNotice && (
           <div
             role="alert"
