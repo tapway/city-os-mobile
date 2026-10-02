@@ -5,7 +5,8 @@ import {
   fetchAuthMode,
   submitPasswordLogin,
   createPasswordLoginController,
-  LOGIN_ERRORS,
+  LOGIN_ERROR_KEYS,
+  loginErrorKey,
 } from '../src/lib/password-login';
 import { PasswordLoginFields } from '../src/routes/password-login-form';
 import { clearAccessToken, getAccessToken } from '../src/lib/auth';
@@ -52,26 +53,27 @@ describe('submitPasswordLogin', () => {
   });
 
   it.each([
-    [401, LOGIN_ERRORS[401]],
-    [403, LOGIN_ERRORS[403]],
-    [422, LOGIN_ERRORS[422]],
-    [429, LOGIN_ERRORS[429]],
-    [503, LOGIN_ERRORS[503]],
-  ])('shows a specific message for %i', async (status, message) => {
+    [401, 'login.error.401'],
+    [403, 'login.error.403'],
+    [422, 'login.error.422'],
+    [429, 'login.error.429'],
+    [503, 'login.error.503'],
+  ])('reports a specific message key for %i', async (status, messageKey) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(status, { detail: 'x' })));
-    expect(await submitPasswordLogin('a', 'b')).toEqual({ ok: false, message });
+    expect(await submitPasswordLogin('a', 'b')).toEqual({ ok: false, messageKey });
     expect(getAccessToken()).toBeNull();
   });
 
   it('treats a network failure like 503', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
-    expect(await submitPasswordLogin('a', 'b')).toEqual({ ok: false, message: LOGIN_ERRORS[503] });
+    expect(await submitPasswordLogin('a', 'b')).toEqual({ ok: false, messageKey: 'login.error.503' });
   });
 
-  it('has distinct, non-empty messages', () => {
-    const msgs = Object.values(LOGIN_ERRORS);
-    expect(new Set(msgs).size).toBe(msgs.length);
-    msgs.forEach((m) => expect(m.length).toBeGreaterThan(10));
+  it('maps statuses to keys, 5xx to 503 and anything else to generic', () => {
+    expect(loginErrorKey(401)).toBe('login.error.401');
+    expect(loginErrorKey(502)).toBe('login.error.503');
+    expect(loginErrorKey(418)).toBe('login.error.generic');
+    expect(new Set(Object.values(LOGIN_ERROR_KEYS)).size).toBe(5);
   });
 });
 
@@ -96,7 +98,7 @@ describe('createPasswordLoginController', () => {
   it('surfaces the error, clears it on the next attempt, and frees the form', async () => {
     const submit = vi
       .fn()
-      .mockResolvedValueOnce({ ok: false, message: 'nope' })
+      .mockResolvedValueOnce({ ok: false, messageKey: 'login.error.401' })
       .mockResolvedValueOnce({ ok: true });
     const onSuccess = vi.fn();
     const c = createPasswordLoginController({ submit, onSuccess });
@@ -104,7 +106,7 @@ describe('createPasswordLoginController', () => {
     c.subscribe(() => seen.push(c.getState().error));
 
     await c.submit('u', 'p');
-    expect(c.getState()).toEqual({ busy: false, error: 'nope' });
+    expect(c.getState()).toEqual({ busy: false, error: 'login.error.401' });
     expect(onSuccess).not.toHaveBeenCalled();
 
     await c.submit('u', 'p');
@@ -118,12 +120,12 @@ describe('createPasswordLoginController', () => {
     await c.submit('  ', 'pw');
     await c.submit('u', '');
     expect(submit).not.toHaveBeenCalled();
-    expect(c.getState().error).toBe(LOGIN_ERRORS[422]);
+    expect(c.getState().error).toBe('login.error.422');
   });
 });
 
 describe('PasswordLoginFields markup', () => {
-  const render = (props: { busy: boolean; error: string | null }) =>
+  const render = (props: { busy: boolean; error: 'login.error.401' | null }) =>
     // React's server renderer keeps camelCase prop names (autoComplete); the DOM
     // attribute is case-insensitive, so compare lower-cased.
     renderToStaticMarkup(createElement(PasswordLoginFields, { ...props, onSubmit: () => {} })).toLowerCase();
@@ -141,7 +143,7 @@ describe('PasswordLoginFields markup', () => {
   });
 
   it('shows the error inline as an alert', () => {
-    const html = render({ busy: false, error: LOGIN_ERRORS[401] });
+    const html = render({ busy: false, error: 'login.error.401' });
     expect(html).toMatch(/role="alert"[^>]*>[^<]*incorrect username or password/);
   });
 

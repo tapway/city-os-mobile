@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { t } from '../i18n';
+import { t, msgOf, type Msg } from '../i18n';
 
 export interface GeoFix {
   lat: number;
@@ -13,7 +13,7 @@ export interface GeoFix {
 interface GeoState {
   fix: GeoFix | null;
   loading: boolean;
-  error: string | null;
+  error: Msg | null;
 }
 
 /** A fix older than this is not trusted for a "you were here" record. */
@@ -42,7 +42,7 @@ export function useGeolocation(options: { auto?: boolean } = {}) {
     setState((s) => ({ ...s, loading: true, error: null }));
 
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setState((s) => ({ ...s, loading: false, error: t('gps.unavailable') }));
+      setState((s) => ({ ...s, loading: false, error: msgOf('gps.unavailable') }));
       return;
     }
 
@@ -62,12 +62,14 @@ export function useGeolocation(options: { auto?: boolean } = {}) {
       },
       (err) => {
         if (!mounted.current) return;
-        const message =
+        const message: Msg =
           err.code === err.PERMISSION_DENIED
-            ? t('gps.denied')
+            ? msgOf('gps.denied')
             : err.code === err.TIMEOUT
-              ? t('gps.timeout')
-              : err.message || t('gps.failed');
+              ? msgOf('gps.timeout')
+              : err.message
+                ? msgOf(new Error(err.message))
+                : msgOf('gps.failed');
         setState((s) => ({ ...s, loading: false, error: message }));
       },
       { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 },

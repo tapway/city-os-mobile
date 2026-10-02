@@ -70,7 +70,7 @@ export function PasswordLoginFields({
       </div>
       {error && (
         <p role="alert" style={{ color: 'var(--red, #ff6b6b)', fontSize: 12, lineHeight: 1.4, margin: '0 0 14px' }}>
-          {error}
+          {t(error)}
         </p>
       )}
       <Button type="submit" size="lg" disabled={busy} style={{ width: '100%' }}>

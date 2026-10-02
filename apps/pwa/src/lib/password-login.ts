@@ -9,23 +9,24 @@
  * kept in controller state.
  */
 import { setAccessToken } from './auth';
-import { t } from '../i18n';
+import type { MessageKey } from '../i18n';
 
 export type AuthMode = 'password' | 'pkce';
 
-/**
- * Sign-in error messages by HTTP status. Getters, so each read is translated
- * into the language active at that moment (EN/BM).
- */
-export const LOGIN_ERRORS = {
-  get 401() { return t('login.error.401'); },
-  get 403() { return t('login.error.403'); },
-  get 422() { return t('login.error.422'); },
-  get 429() { return t('login.error.429'); },
-  get 503() { return t('login.error.503'); },
-};
+/** Sign-in error message keys by HTTP status; rendered with t() at display time (EN/BM). */
+export const LOGIN_ERROR_KEYS = {
+  401: 'login.error.401',
+  403: 'login.error.403',
+  422: 'login.error.422',
+  429: 'login.error.429',
+  503: 'login.error.503',
+} as const satisfies Record<number, MessageKey>;
 
-const genericError = () => t('login.error.generic');
+export function loginErrorKey(status: number): MessageKey {
+  const known = LOGIN_ERROR_KEYS[status as keyof typeof LOGIN_ERROR_KEYS];
+  if (known) return known;
+  return status >= 500 ? LOGIN_ERROR_KEYS[503] : 'login.error.generic';
+}
 
 export async function fetchAuthMode(): Promise<AuthMode> {
   try {
@@ -40,7 +41,7 @@ export async function fetchAuthMode(): Promise<AuthMode> {
   return 'password';
 }
 
-export type LoginResult = { ok: true } | { ok: false; message: string };
+export type LoginResult = { ok: true } | { ok: false; messageKey: MessageKey };
 
 export async function submitPasswordLogin(username: string, password: string): Promise<LoginResult> {
   let resp: Response;
@@ -52,7 +53,7 @@ export async function submitPasswordLogin(username: string, password: string): P
       body: JSON.stringify({ username, password }),
     });
   } catch {
-    return { ok: false, message: LOGIN_ERRORS[503] };
+    return { ok: false, messageKey: LOGIN_ERROR_KEYS[503] };
   }
 
   if (resp.ok) {
@@ -65,17 +66,15 @@ export async function submitPasswordLogin(username: string, password: string): P
     } catch {
       // fall through
     }
-    return { ok: false, message: genericError() };
+    return { ok: false, messageKey: 'login.error.generic' };
   }
 
-  const known = LOGIN_ERRORS[resp.status as keyof typeof LOGIN_ERRORS];
-  if (known) return { ok: false, message: known };
-  return { ok: false, message: resp.status >= 500 ? LOGIN_ERRORS[503] : genericError() };
+  return { ok: false, messageKey: loginErrorKey(resp.status) };
 }
 
 export interface LoginState {
   busy: boolean;
-  error: string | null;
+  error: MessageKey | null;
 }
 
 interface ControllerDeps {
@@ -103,7 +102,7 @@ export function createPasswordLoginController({ submit, onSuccess }: ControllerD
     async submit(username: string, password: string): Promise<void> {
       if (state.busy) return;
       if (!username.trim() || !password.trim()) {
-        set({ busy: false, error: LOGIN_ERRORS[422] });
+        set({ busy: false, error: LOGIN_ERROR_KEYS[422] });
         return;
       }
       set({ busy: true, error: null });
@@ -111,13 +110,13 @@ export function createPasswordLoginController({ submit, onSuccess }: ControllerD
       try {
         result = await submit(username.trim(), password);
       } catch {
-        result = { ok: false, message: genericError() };
+        result = { ok: false, messageKey: 'login.error.generic' };
       }
       if (result.ok) {
         set({ busy: false, error: null });
         onSuccess();
       } else {
-        set({ busy: false, error: result.message });
+        set({ busy: false, error: result.messageKey });
       }
     },
   };

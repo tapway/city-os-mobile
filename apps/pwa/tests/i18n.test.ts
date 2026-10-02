@@ -13,7 +13,9 @@ import {
   subscribe,
 } from '../src/i18n';
 import { statusLabel, stateLabel, eventLabel } from '../src/i18n/labels';
-import { LOGIN_ERRORS } from '../src/lib/password-login';
+import { loginErrorKey } from '../src/lib/password-login';
+import { translateMsg, msgOf, MsgError } from '../src/i18n';
+import { actionLabel, anyStateLabel } from '../src/i18n/labels';
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const data = { ...initial };
@@ -112,15 +114,15 @@ describe('t()', () => {
 
 describe('status / state labels', () => {
   it('maps known status codes to BM', () => {
-    expect(statusLabel('IN_PROGRESS', 'ms')).toBe('Dalam tindakan');
-    expect(statusLabel('RESOLVED', 'ms')).toBe('Selesai');
+    expect(statusLabel('IN_PROGRESS', 'ms')).toBe('Sedang diproses');
+    expect(statusLabel('RESOLVED', 'ms')).toBe('Diselesaikan');
     expect(statusLabel('CLOSED', 'ms')).toBe('Ditutup');
     expect(statusLabel('OPEN', 'en')).toBe('Open');
     expect(statusLabel('IN_PROGRESS', 'en')).toBe('In progress');
   });
 
   it('maps workflow states to BM', () => {
-    expect(stateLabel('in_progress', 'ms')).toBe('Dalam tindakan');
+    expect(stateLabel('in_progress', 'ms')).toBe('Sedang diproses');
     expect(stateLabel('accepted', 'ms')).toBe('Diterima');
     expect(stateLabel('awaiting_evidence', 'ms')).toBe('Menunggu bukti');
   });
@@ -138,16 +140,83 @@ describe('status / state labels', () => {
 
   it('humanises unknown timeline events and translates known ones', () => {
     expect(eventLabel('some_new_event', 'ms')).toBe('Some New Event');
-    expect(eventLabel('status_changed', 'ms')).not.toBe('Status Changed');
+    expect(eventLabel('start', 'ms')).toBe('Mula Kerja');
+    expect(eventLabel('workflow_start', 'ms')).toBe('Mula Kerja');
+    expect(eventLabel('in_progress', 'ms')).toBe('Sedang diproses');
+    expect(eventLabel('created', 'ms')).toBe('Dicipta');
+    expect(eventLabel('assigned', 'ms')).toBe('Ditugaskan');
+    expect(eventLabel('merged', 'ms')).toBe('Digabungkan');
+    expect(eventLabel('external_callback', 'ms')).toBe('Maklum balas luaran');
+    expect(eventLabel('workflow_unknown_thing', 'ms')).toBe('Workflow Unknown Thing');
+  });
+
+  it('anyStateLabel resolves either a status or a workflow state', () => {
+    expect(anyStateLabel('IN_PROGRESS', 'ms')).toBe('Sedang diproses');
+    expect(anyStateLabel('awaiting_evidence', 'ms')).toBe('Menunggu bukti');
+    expect(anyStateLabel('???', 'ms')).toBe('???');
+    expect(actionLabel('need_support', 'ms')).toBe('Perlu Sokongan');
+    expect(actionLabel('zzz', 'ms')).toBe('zzz');
   });
 });
 
-describe('login errors', () => {
-  it('are translated at read time', () => {
-    setLang('ms', () => fakeStorage());
-    expect(LOGIN_ERRORS[401]).toBe('Nama pengguna atau kata laluan tidak sah.');
-    setLang('en', () => fakeStorage());
-    expect(LOGIN_ERRORS[401]).toMatch(/Incorrect username or password/);
+describe('messages stored as key + vars', () => {
+  it('re-translate when the language changes', () => {
+    const m = msgOf('login.error.401');
+    expect(translateMsg('ms', m)).toBe('Nama pengguna atau kata laluan tidak sah.');
+    expect(translateMsg('en', m)).toMatch(/Incorrect username or password/);
+  });
+
+  it('carries variables', () => {
+    expect(translateMsg('ms', msgOf('tickets.loadError', { message: 'x' }))).toContain('x');
+  });
+
+  it('MsgError keeps the key; foreign errors pass the server text through', () => {
+    expect(msgOf(new MsgError('detail.err.chooseStatus'))).toEqual({ key: 'detail.err.chooseStatus' });
+    expect(translateMsg('ms', msgOf(new Error('Boom from server')))).toBe('Boom from server');
+  });
+
+  it('login status mapping yields translatable keys', () => {
+    for (const s of [401, 403, 422, 429, 503, 500, 418]) {
+      expect(translateMsg('ms', msgOf(loginErrorKey(s)))).not.toBe(loginErrorKey(s));
+    }
+  });
+});
+
+// Values copied from City Help web: wt-mbjb-sf/frontend/src/i18n/ms/enums.json (status, state)
+// and ms/actions.json (incident, governance.close, common). The two apps are demoed side by
+// side, so shared codes must read identically. Update this fixture, not the code, if City Help changes.
+describe('terminology matches City Help (ms)', () => {
+  const STATUS = {
+    OPEN: 'Terbuka', VERIFIED: 'Disahkan', ASSIGNED: 'Ditugaskan', IN_PROGRESS: 'Sedang diproses',
+    RESOLVED: 'Diselesaikan', CLOSED: 'Ditutup',
+  };
+  const STATE = {
+    intake: 'Penerimaan', confirmed: 'Disahkan', dispatch: 'Penugasan', accepted: 'Diterima',
+    in_progress: 'Sedang diproses', waiting_for_support: 'Menunggu sokongan', done: 'Selesai',
+    awaiting_evidence: 'Menunggu bukti', verified: 'Disemak', closed: 'Ditutup', voided: 'Dibatalkan',
+    review: 'Dalam semakan', approved: 'Diluluskan', rejected: 'Ditolak', completed: 'Serahan Selesai',
+  };
+  const ACTION = {
+    confirm: 'Sahkan (Tahap ke-2)', submit: 'Hantar untuk Penugasan', direct_reply: 'Balas Terus (Tutup Segera)',
+    void: 'Batalkan', restore: 'Pulihkan', accept: 'Terima', assign: 'Terima', escalate: 'Eskalasi',
+    start: 'Mula Kerja', need_support: 'Perlu Sokongan', resume: 'Sambung', complete: 'Selesai',
+    upload_evidence: 'Muat Naik Bukti', verify: 'Sahkan', review_approve: 'Lulus & Tutup',
+    review_reject: 'Tolak', approve: 'Lulus & Tutup', reject: 'Tolak',
+    close: 'Tutup',
+    classify: 'Klasifikasi', auto_dispatch: 'Hantar Automatik', assign_department: 'Tugaskan Jabatan',
+    record_rating: 'Rekod Penilaian', extension_request: 'Mohon Lanjutan', lock_request: 'Mohon Kunci',
+    unlock: 'Buka Kunci', approve_request: 'Luluskan Permohonan', reject_request: 'Tolak Permohonan',
+    add_note: 'Tambah Nota', merge: 'Gabung',
+  };
+  it.each(Object.entries(STATUS))('status %s', (c, v) => expect(statusLabel(c, 'ms')).toBe(v));
+  it.each(Object.entries(STATE))('state %s', (c, v) => expect(stateLabel(c, 'ms')).toBe(v));
+  it.each(Object.entries(ACTION))('action %s', (c, v) => expect(actionLabel(c, 'ms')).toBe(v));
+  it('mobile quick-action buttons use City Help action terms', () => {
+    expect(ms['act.start']).toBe(ACTION.start);
+    expect(ms['act.accept']).toBe(ACTION.accept);
+    expect(ms['act.resume']).toBe(ACTION.resume);
+    expect(ms['act.need_support']).toBe(ACTION.need_support);
+    expect(ms['act.close']).toBe(ACTION.close);
   });
 });
 
@@ -158,6 +227,8 @@ describe('no hard-coded English in screen sources', () => {
     'tickets.tsx',
     'ticket.$id.tsx',
     '__root.tsx',
+    'attendance.tsx',
+    'create-ticket.tsx',
   ];
   // Brand names that are intentionally not translated.
   const ALLOWED = new Set(['CITY HELP', 'City Guard', 'OK']);

@@ -19,8 +19,8 @@ import { ApiError, isOfflineError } from '../lib/api';
 import { enqueueMutation } from '../lib/offline-queue';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
 import { useLang } from '../i18n/react';
-import { statusLabel, stateLabel, eventLabel } from '../i18n/labels';
-import { t as tNow, type MessageKey } from '../i18n';
+import { statusLabel, stateLabel, eventLabel, anyStateLabel } from '../i18n/labels';
+import { MsgError, msgOf, type Msg, type MessageKey } from '../i18n';
 
 const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
   OPEN: 'warning',
@@ -33,9 +33,9 @@ const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger
 
 /** Field-officer shortcuts: label → the status they move the ticket to. */
 const QUICK_ACTIONS: { labelKey: MessageKey; noteKey: MessageKey; status: string }[] = [
-  { labelKey: 'action.start', noteKey: 'action.note.start', status: 'IN_PROGRESS' },
+  { labelKey: 'act.start', noteKey: 'action.note.start', status: 'IN_PROGRESS' },
   { labelKey: 'action.resolve', noteKey: 'action.note.resolve', status: 'RESOLVED' },
-  { labelKey: 'action.close', noteKey: 'action.note.close', status: 'CLOSED' },
+  { labelKey: 'act.close', noteKey: 'action.note.close', status: 'CLOSED' },
 ];
 
 const ALL_STATUSES = ['OPEN', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
@@ -55,7 +55,7 @@ function formatWhen(value: string | null): string {
 }
 
 export function TicketDetailPage() {
-  const { t, lang } = useLang();
+  const { t, tm, lang } = useLang();
   const { id: ticketUid } = useParams({ from: '/tickets/$id' });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -64,8 +64,8 @@ export function TicketDetailPage() {
   const [status, setStatus] = useState('');
   const [comment, setComment] = useState('');
   const [images, setImages] = useState<PendingImage[]>([]);
-  const [formError, setFormError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [formError, setFormError] = useState<Msg | null>(null);
+  const [notice, setNotice] = useState<Msg | null>(null);
 
   const { data: ticket, isLoading, error } = useQuery({
     queryKey: ['ticket', ticketUid],
@@ -93,10 +93,10 @@ export function TicketDetailPage() {
 
   const updateMutation = useMutation({
     mutationFn: async () => {
-      if (!ticketUid) throw new Error(tNow('detail.err.missingTicket'));
-      if (!status) throw new Error(tNow('detail.err.chooseStatus'));
+      if (!ticketUid) throw new MsgError('detail.err.missingTicket');
+      if (!status) throw new MsgError('detail.err.chooseStatus');
       if (!geo.isFresh || typeof geo.lat !== 'number' || typeof geo.lng !== 'number') {
-        throw new Error(tNow('detail.err.needGps'));
+        throw new MsgError('detail.err.needGps');
       }
 
       // Upload evidence first so a failed upload never leaves a half-written update.
@@ -141,20 +141,16 @@ export function TicketDetailPage() {
       images.forEach((i) => URL.revokeObjectURL(i.preview));
       setImages([]);
       setStatus('');
-      setFormError('');
-      setNotice(
-        saved === null
-          ? tNow('detail.notice.queued')
-          : tNow('detail.notice.saved'),
-      );
+      setFormError(null);
+      setNotice(msgOf(saved === null ? 'detail.notice.queued' : 'detail.notice.saved'));
       queryClient.invalidateQueries({ queryKey: ['ticket', ticketUid] });
       queryClient.invalidateQueries({ queryKey: ['timeline', ticketUid] });
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
       geo.getPosition();
     },
     onError: (err: Error) => {
-      setNotice('');
-      setFormError(err.message);
+      setNotice(null);
+      setFormError(msgOf(err));
     },
   });
 
@@ -164,7 +160,7 @@ export function TicketDetailPage() {
     input.accept = 'image/*';
     input.capture = 'environment';
     input.multiple = true;
-    input.setAttribute('aria-label', tNow('detail.addPhotoAria'));
+    input.setAttribute('aria-label', t('detail.addPhotoAria'));
     input.onchange = (e) => {
       const files = Array.from((e.target as HTMLInputElement).files ?? []);
       const next = files.map((file) => ({ file, preview: URL.createObjectURL(file) }));
@@ -343,7 +339,7 @@ export function TicketDetailPage() {
             </Button>
           </div>
           {geo.error && (
-            <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginBottom: 8 }}>{geo.error}</p>
+            <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginBottom: 8 }}>{tm(geo.error)}</p>
           )}
           {!geo.isFresh && !geo.error && (
             <p style={{ color: 'var(--ink-faint)', fontSize: 11, marginBottom: 8 }}>
@@ -446,10 +442,10 @@ export function TicketDetailPage() {
           )}
 
           {formError && (
-            <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginBottom: 8 }}>{formError}</p>
+            <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginBottom: 8 }}>{tm(formError)}</p>
           )}
           {notice && (
-            <p role="status" style={{ color: 'var(--safe, #34d399)', fontSize: 11, marginBottom: 8 }}>{notice}</p>
+            <p role="status" style={{ color: 'var(--safe, #34d399)', fontSize: 11, marginBottom: 8 }}>{tm(notice)}</p>
           )}
 
           <Button
@@ -488,7 +484,7 @@ export function TicketDetailPage() {
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--ink-dim)', marginTop: 2 }}>
                   {event.actor || t('detail.system')}
-                  {event.old_status && event.new_status ? ` · ${statusLabel(event.old_status, lang)} → ${statusLabel(event.new_status, lang)}` : ''}
+                  {event.old_status && event.new_status ? ` · ${anyStateLabel(event.old_status, lang)} → ${anyStateLabel(event.new_status, lang)}` : ''}
                 </div>
                 {event.note && (
                   <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 4, lineHeight: 1.5 }}>

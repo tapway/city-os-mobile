@@ -87,3 +87,40 @@ export function translate(lang: Lang, key: MessageKey, vars?: Record<string, str
 export function t(key: MessageKey, vars?: Record<string, string | number>): string {
   return translate(getLang(), key, vars);
 }
+
+// ---- Messages held as data -------------------------------------------------
+// State that shows an error/notice stores a Msg (key + vars), never the rendered
+// string, so the text re-translates when the language is toggled.
+
+export type Vars = Record<string, string | number>;
+export interface Msg {
+  key: MessageKey;
+  vars?: Vars;
+}
+
+/** An Error that carries a translatable message. */
+export class MsgError extends Error {
+  readonly msg: Msg;
+  constructor(key: MessageKey, vars?: Vars) {
+    super(key);
+    this.name = 'MsgError';
+    this.msg = vars ? { key, vars } : { key };
+  }
+}
+
+/** Build a Msg from a key, a MsgError, a Msg, or any other error (server text passes through). */
+export function msgOf(input: MessageKey | Msg | unknown, vars?: Vars): Msg {
+  if (typeof input === 'string' && hasKey(input)) return vars ? { key: input, vars } : { key: input };
+  if (input instanceof MsgError) return input.msg;
+  if (input && typeof input === 'object' && 'key' in input && hasKey(String((input as Msg).key))) return input as Msg;
+  const message = input instanceof Error ? input.message : String(input ?? '');
+  return { key: 'msg.raw', vars: { message } };
+}
+
+export function translateMsg(lang: Lang, msg: Msg): string {
+  return translate(lang, msg.key, msg.vars);
+}
+
+export function tMsg(msg: Msg): string {
+  return translateMsg(getLang(), msg);
+}
