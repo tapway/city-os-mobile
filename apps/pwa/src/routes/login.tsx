@@ -4,6 +4,8 @@ import { Button } from '@city-os/ui';
 import { bootstrapSession, loginRedirect, markSignedIn } from '../lib/auth';
 import { fetchAuthMode, type AuthMode } from '../lib/password-login';
 import { PasswordLoginForm } from './password-login-form';
+import { LanguageToggle } from '../i18n/LanguageToggle';
+import { useLang } from '../i18n/react';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -52,9 +54,13 @@ export function LoginBody({
   onPkce: () => void;
   onPasswordSuccess: () => void;
 }) {
+  const { t } = useLang();
   return (
     <div className="app-shell" style={{ alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
       <div className="glass-panel" style={{ width: '100%', maxWidth: 320, padding: '32px 24px', textAlign: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <LanguageToggle />
+        </div>
         <h1 className="hud-title" style={{ fontSize: 18, marginBottom: 8 }}>CITY HELP</h1>
         <div
           style={{
@@ -62,16 +68,16 @@ export function LoginBody({
             marginBottom: 24, letterSpacing: '0.1em', textTransform: 'uppercase',
           }}
         >
-          Field Operations App
+          {t('login.subtitle')}
         </div>
         <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 24, lineHeight: 1.5 }}>
-          Sign in to search tickets, add comments and photos, and record your GPS position on site.
+          {t('login.intro')}
         </p>
         {mode === 'password' ? (
           <PasswordLoginForm onSuccess={onPasswordSuccess} />
         ) : (
           <Button onClick={onPkce} size="lg" className="w-full" disabled={mode === null} style={{ width: '100%' }}>
-            {mode === null ? 'Checking session…' : 'Sign in with City Guard'}
+            {mode === null ? t('login.checking') : t('login.cityGuard')}
           </Button>
         )}
       </div>

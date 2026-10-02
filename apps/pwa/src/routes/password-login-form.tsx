@@ -5,6 +5,7 @@ import {
   submitPasswordLogin,
   type LoginState,
 } from '../lib/password-login';
+import { useLang } from '../i18n/react';
 
 const fieldStyle = {
   width: '100%',
@@ -25,6 +26,7 @@ export function PasswordLoginFields({
   error,
   onSubmit,
 }: LoginState & { onSubmit: (username: string, password: string) => void }) {
+  const { t } = useLang();
   const handle = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -35,7 +37,7 @@ export function PasswordLoginFields({
     <form onSubmit={handle} aria-busy={busy} noValidate style={{ textAlign: 'left' }}>
       <div style={{ marginBottom: 14 }}>
         <label htmlFor="login-username" className="hud-label" style={labelStyle}>
-          Username
+          {t('login.username')}
         </label>
         <input
           id="login-username"
@@ -53,7 +55,7 @@ export function PasswordLoginFields({
       </div>
       <div style={{ marginBottom: 14 }}>
         <label htmlFor="login-password" className="hud-label" style={labelStyle}>
-          Password
+          {t('login.password')}
         </label>
         <input
           id="login-password"
@@ -72,7 +74,7 @@ export function PasswordLoginFields({
         </p>
       )}
       <Button type="submit" size="lg" disabled={busy} style={{ width: '100%' }}>
-        {busy ? 'Signing in…' : 'Sign in'}
+        {busy ? t('login.submitting') : t('login.submit')}
       </Button>
     </form>
   );

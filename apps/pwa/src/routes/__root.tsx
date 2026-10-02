@@ -3,6 +3,8 @@ import { List, Clock, Plus, LogOut } from 'lucide-react';
 import { logout } from '../lib/auth';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useOfflineSync } from '../hooks/useOfflineSync';
+import { useLang } from '../i18n/react';
+import { LanguageToggle } from '../i18n/LanguageToggle';
 
 const NAV_ITEM_STYLE = {
   display: 'flex',
@@ -20,6 +22,7 @@ const NAV_LABEL_STYLE = {
 };
 
 export function RootLayout() {
+  const { t } = useLang();
   const location = useLocation();
   const online = useOnlineStatus();
   const { pending, syncing } = useOfflineSync();
@@ -45,10 +48,11 @@ export function RootLayout() {
               textTransform: 'uppercase', color: 'var(--ink-dim)',
             }}
           >
-            City OS Operations
+            {t('app.header')}
           </span>
           {/* A field officer hands the handset over at the end of a shift; without
               this the session (and the cached screens) stayed on the device. */}
+          <LanguageToggle />
           <button
             type="button"
             onClick={() => void logout()}
@@ -61,7 +65,7 @@ export function RootLayout() {
             }}
           >
             <LogOut size={14} aria-hidden="true" />
-            Sign out
+            {t('app.signOut')}
           </button>
         </header>
       )}
@@ -83,9 +87,9 @@ export function RootLayout() {
           >
             {online
               ? syncing
-                ? `Syncing ${pending} queued update(s)…`
-                : `${pending} update(s) waiting to sync`
-              : 'Offline — updates will sync when you reconnect'}
+                ? t('offline.syncing', { pending })
+                : t('offline.waiting', { pending })
+              : t('offline.banner')}
           </div>
         )}
         <Outlet />
@@ -93,7 +97,7 @@ export function RootLayout() {
       {!isLogin && (
         <nav
           className="app-bottom-nav flex justify-around items-center px-4 py-2"
-          aria-label="Main navigation"
+          aria-label={t('nav.aria')}
           style={{ background: 'var(--glass)', borderTop: '1px solid var(--border)', backdropFilter: 'blur(24px)' }}
         >
           <Link
@@ -102,11 +106,11 @@ export function RootLayout() {
             aria-current={isActive('/tickets') ? 'page' : undefined}
           >
             <List size={22} aria-hidden="true" />
-            <span style={NAV_LABEL_STYLE}>Tickets</span>
+            <span style={NAV_LABEL_STYLE}>{t('nav.tickets')}</span>
           </Link>
           <Link
             to="/create-ticket"
-            aria-label="Report an incident"
+            aria-label={t('nav.report')}
             aria-current={isActive('/create-ticket') ? 'page' : undefined}
             className="flex flex-col items-center -mt-3"
             style={{ textDecoration: 'none' }}
@@ -127,7 +131,7 @@ export function RootLayout() {
             aria-current={isActive('/attendance') ? 'page' : undefined}
           >
             <Clock size={22} aria-hidden="true" />
-            <span style={NAV_LABEL_STYLE}>Attendance</span>
+            <span style={NAV_LABEL_STYLE}>{t('nav.attendance')}</span>
           </Link>
         </nav>
       )}

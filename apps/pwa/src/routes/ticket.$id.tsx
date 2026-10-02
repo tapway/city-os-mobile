@@ -18,6 +18,9 @@ import { getActor } from '../lib/auth';
 import { ApiError, isOfflineError } from '../lib/api';
 import { enqueueMutation } from '../lib/offline-queue';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
+import { useLang } from '../i18n/react';
+import { statusLabel, stateLabel, eventLabel } from '../i18n/labels';
+import { t as tNow, type MessageKey } from '../i18n';
 
 const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
   OPEN: 'warning',
@@ -29,11 +32,11 @@ const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger
 };
 
 /** Field-officer shortcuts: label → the status they move the ticket to. */
-const QUICK_ACTIONS = [
-  { label: 'Start work', status: 'IN_PROGRESS', note: 'Started handling on site' },
-  { label: 'Submit resolution', status: 'RESOLVED', note: 'Work completed on site' },
-  { label: 'Close ticket', status: 'CLOSED', note: 'Closed after verification' },
-] as const;
+const QUICK_ACTIONS: { labelKey: MessageKey; noteKey: MessageKey; status: string }[] = [
+  { labelKey: 'action.start', noteKey: 'action.note.start', status: 'IN_PROGRESS' },
+  { labelKey: 'action.resolve', noteKey: 'action.note.resolve', status: 'RESOLVED' },
+  { labelKey: 'action.close', noteKey: 'action.note.close', status: 'CLOSED' },
+];
 
 const ALL_STATUSES = ['OPEN', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
 
@@ -51,11 +54,8 @@ function formatWhen(value: string | null): string {
   });
 }
 
-function humaniseEvent(eventType: string): string {
-  return eventType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 export function TicketDetailPage() {
+  const { t, lang } = useLang();
   const { id: ticketUid } = useParams({ from: '/tickets/$id' });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -93,10 +93,10 @@ export function TicketDetailPage() {
 
   const updateMutation = useMutation({
     mutationFn: async () => {
-      if (!ticketUid) throw new Error('Missing ticket reference');
-      if (!status) throw new Error('Choose the new status');
+      if (!ticketUid) throw new Error(tNow('detail.err.missingTicket'));
+      if (!status) throw new Error(tNow('detail.err.chooseStatus'));
       if (!geo.isFresh || typeof geo.lat !== 'number' || typeof geo.lng !== 'number') {
-        throw new Error('A fresh GPS fix is required — tap “Get GPS” and try again');
+        throw new Error(tNow('detail.err.needGps'));
       }
 
       // Upload evidence first so a failed upload never leaves a half-written update.
@@ -144,8 +144,8 @@ export function TicketDetailPage() {
       setFormError('');
       setNotice(
         saved === null
-          ? 'No connection — update saved on this device and sent automatically.'
-          : 'Ticket updated with your GPS position.',
+          ? tNow('detail.notice.queued')
+          : tNow('detail.notice.saved'),
       );
       queryClient.invalidateQueries({ queryKey: ['ticket', ticketUid] });
       queryClient.invalidateQueries({ queryKey: ['timeline', ticketUid] });
@@ -164,7 +164,7 @@ export function TicketDetailPage() {
     input.accept = 'image/*';
     input.capture = 'environment';
     input.multiple = true;
-    input.setAttribute('aria-label', 'Add photo evidence');
+    input.setAttribute('aria-label', tNow('detail.addPhotoAria'));
     input.onchange = (e) => {
       const files = Array.from((e.target as HTMLInputElement).files ?? []);
       const next = files.map((file) => ({ file, preview: URL.createObjectURL(file) }));
@@ -200,11 +200,11 @@ export function TicketDetailPage() {
             fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em',
           }}
         >
-          <ArrowLeft size={16} /> Back
+          <ArrowLeft size={16} /> {t('detail.back')}
         </button>
         <div className="glass-panel" style={{ padding: 16, borderColor: 'rgba(239,68,68,0.4)' }}>
           <p role="alert" style={{ color: 'var(--danger)', fontSize: 13 }}>
-            {error ? `Could not load ticket: ${(error as Error).message}` : 'Ticket not found.'}
+            {error ? t('detail.loadError', { message: (error as Error).message }) : t('detail.notFound')}
           </p>
         </div>
       </div>
@@ -214,7 +214,7 @@ export function TicketDetailPage() {
   const detail: TicketDetail = ticket;
   const gpsLabel = geo.fix
     ? `${geo.fix.lat.toFixed(6)}, ${geo.fix.lng.toFixed(6)}${geo.accuracy ? ` (±${Math.round(geo.accuracy)} m)` : ''} · ${formatFixAge(geo.ageMs)}`
-    : 'No GPS fix yet';
+    : t('detail.gpsNone');
 
   return (
     <div className="app-content" style={{ padding: '16px' }}>
@@ -227,7 +227,7 @@ export function TicketDetailPage() {
           fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em',
         }}
       >
-        <ArrowLeft size={16} /> Back
+        <ArrowLeft size={16} /> {t('detail.back')}
       </button>
 
       {/* Header */}
@@ -237,7 +237,7 @@ export function TicketDetailPage() {
             {detail.title}
           </h1>
           <Badge variant={STATUS_VARIANT[detail.status] || 'default'}>
-            {detail.status?.replace('_', ' ')}
+            {statusLabel(detail.status ?? '', lang)}
           </Badge>
         </div>
         <p style={{ fontFamily: 'var(--font-label)', fontSize: 10, color: 'var(--cyan)', marginBottom: 8 }}>
@@ -247,10 +247,10 @@ export function TicketDetailPage() {
           <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>{detail.description}</p>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, fontSize: 10, color: 'var(--ink-faint)', fontFamily: 'var(--font-label)' }}>
-          {detail.workflow_state && <span>Stage: {detail.workflow_state.replace(/_/g, ' ')}</span>}
-          {detail.source && <span>Source: {detail.source}</span>}
-          {detail.assigned_to && <span>Assigned: {detail.assigned_to}</span>}
-          {detail.jira_issue_key && <span>Jira: {detail.jira_issue_key}</span>}
+          {detail.workflow_state && <span>{t('detail.stage', { value: stateLabel(detail.workflow_state, lang) })}</span>}
+          {detail.source && <span>{t('detail.source', { value: detail.source })}</span>}
+          {detail.assigned_to && <span>{t('detail.assigned', { value: detail.assigned_to })}</span>}
+          {detail.jira_issue_key && <span>{t('detail.jira', { value: detail.jira_issue_key })}</span>}
         </div>
       </div>
 
@@ -269,9 +269,9 @@ export function TicketDetailPage() {
             ) : (
               <Clock size={15} style={{ color: 'var(--cyan)' }} />
             )}
-            <span className="hud-label">SLA</span>
+            <span className="hud-label">{t('detail.sla')}</span>
             <span style={{ fontSize: 11, color: detail.sla_breached ? 'var(--danger)' : 'var(--ink-dim)', marginLeft: 'auto' }}>
-              {detail.sla_breached ? 'Breached' : 'Due'} {formatWhen(detail.sla_deadline)}
+              {t(detail.sla_breached ? 'detail.slaBreached' : 'detail.slaDue', { when: formatWhen(detail.sla_deadline) })}
             </span>
           </div>
         </div>
@@ -282,7 +282,7 @@ export function TicketDetailPage() {
         <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <MapPin size={16} style={{ color: 'var(--cyan)' }} />
-            <span className="hud-label">Ticket location</span>
+            <span className="hud-label">{t('detail.location')}</span>
           </div>
           <p style={{ fontSize: 12, color: 'var(--ink)' }}>
             {detail.location_desc || `${detail.lat.toFixed(6)}, ${detail.lng.toFixed(6)}`}
@@ -298,7 +298,7 @@ export function TicketDetailPage() {
               borderRadius: 2, textDecoration: 'none',
             }}
           >
-            Open in Maps
+            {t('detail.openMaps')}
           </a>
         </div>
       )}
@@ -306,13 +306,13 @@ export function TicketDetailPage() {
       {/* Existing evidence */}
       {detail.image_urls && detail.image_urls.length > 0 && (
         <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
-          <span className="hud-label" style={{ display: 'block', marginBottom: 8 }}>Attached images</span>
+          <span className="hud-label" style={{ display: 'block', marginBottom: 8 }}>{t('detail.attachedImages')}</span>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {detail.image_urls.map((url) => (
               <a key={url} href={storageUrl(url)} target="_blank" rel="noreferrer">
                 <img
                   src={storageUrl(url)}
-                  alt="Ticket evidence"
+                  alt={t('detail.evidenceAlt')}
                   style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 2, border: '1px solid var(--border)' }}
                 />
               </a>
@@ -324,7 +324,7 @@ export function TicketDetailPage() {
       {/* Update form */}
       {!['CLOSED'].includes(detail.status) && (
         <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
-          <h2 className="hud-label" style={{ marginBottom: 10 }}>Update ticket</h2>
+          <h2 className="hud-label" style={{ marginBottom: 10 }}>{t('detail.updateTitle')}</h2>
 
           {/* GPS */}
           <div
@@ -339,7 +339,7 @@ export function TicketDetailPage() {
               {gpsLabel}
             </span>
             <Button onClick={() => geo.getPosition()} variant="outline" size="sm" disabled={geo.loading}>
-              {geo.loading ? 'Locating…' : 'Get GPS'}
+              {geo.loading ? t('detail.gpsLocating') : t('detail.gpsGet')}
             </Button>
           </div>
           {geo.error && (
@@ -347,7 +347,7 @@ export function TicketDetailPage() {
           )}
           {!geo.isFresh && !geo.error && (
             <p style={{ color: 'var(--ink-faint)', fontSize: 11, marginBottom: 8 }}>
-              Your GPS position is recorded with the update — a fix within the last 5 minutes is required.
+              {t('detail.gpsHint')}
             </p>
           )}
 
@@ -359,7 +359,7 @@ export function TicketDetailPage() {
                 type="button"
                 onClick={() => {
                   setStatus(action.status);
-                  setComment((prev) => prev || action.note);
+                  setComment((prev) => prev || t(action.noteKey));
                 }}
                 style={{
                   padding: '7px 11px', fontSize: 10, fontFamily: 'var(--font-label)',
@@ -369,14 +369,14 @@ export function TicketDetailPage() {
                   color: status === action.status ? 'var(--cyan)' : 'var(--ink-dim)',
                 }}
               >
-                {action.label}
+                {t(action.labelKey)}
               </button>
             ))}
           </div>
 
           {/* Status */}
           <label htmlFor="update-status" className="hud-label" style={{ display: 'block', marginBottom: 6 }}>
-            New status
+            {t('detail.newStatus')}
           </label>
           <select
             id="update-status"
@@ -388,21 +388,21 @@ export function TicketDetailPage() {
               fontFamily: 'var(--font-body)', marginBottom: 10,
             }}
           >
-            <option value="">— Select status —</option>
+            <option value="">{t('detail.selectStatus')}</option>
             {statusOptions.map((s) => (
-              <option key={s} value={s}>{s.replace('_', ' ')}</option>
+              <option key={s} value={s}>{statusLabel(s, lang)}</option>
             ))}
           </select>
 
           {/* Comment */}
           <label htmlFor="update-comment" className="hud-label" style={{ display: 'block', marginBottom: 6 }}>
-            Comment
+            {t('detail.comment')}
           </label>
           <textarea
             id="update-comment"
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            placeholder="What did you find or do on site?"
+            placeholder={t('detail.commentPlaceholder')}
             style={{
               width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
               borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
@@ -413,10 +413,10 @@ export function TicketDetailPage() {
           {/* Evidence */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <Button onClick={handleCapture} variant="outline" size="sm">
-              <Camera size={14} /> Add photo
+              <Camera size={14} /> {t('detail.addPhoto')}
             </Button>
             <span style={{ fontSize: 10, color: 'var(--ink-faint)' }}>
-              {images.length > 0 ? `${images.length} photo(s) attached` : 'Optional evidence'}
+              {images.length > 0 ? t('detail.photosAttached', { count: images.length }) : t('detail.photosOptional')}
             </span>
           </div>
           {images.length > 0 && (
@@ -425,13 +425,13 @@ export function TicketDetailPage() {
                 <div key={img.preview} style={{ position: 'relative' }}>
                   <img
                     src={img.preview}
-                    alt={`Evidence ${index + 1}`}
+                    alt={t('detail.evidenceN', { n: index + 1 })}
                     style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 2, border: '1px solid var(--border)' }}
                   />
                   <button
                     type="button"
                     onClick={() => removeImage(index)}
-                    aria-label={`Remove photo ${index + 1}`}
+                    aria-label={t('detail.removePhoto', { n: index + 1 })}
                     style={{
                       position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%',
                       border: 'none', background: 'var(--danger)', color: '#fff', cursor: 'pointer',
@@ -458,7 +458,7 @@ export function TicketDetailPage() {
             size="md"
             style={{ width: '100%' }}
           >
-            {updateMutation.isPending ? 'Saving…' : 'Save update'}
+            {updateMutation.isPending ? t('detail.saving') : t('detail.save')}
           </Button>
         </div>
       )}
@@ -467,28 +467,28 @@ export function TicketDetailPage() {
       <div className="glass-panel" style={{ padding: '14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           <MessageSquare size={15} style={{ color: 'var(--cyan)' }} />
-          <span className="hud-label">Activity</span>
+          <span className="hud-label">{t('detail.activity')}</span>
           <span style={{ fontSize: 10, color: 'var(--ink-faint)', marginLeft: 'auto' }}>
-            {timeline?.length ?? 0} entries
+            {t('detail.entries', { count: timeline?.length ?? 0 })}
           </span>
         </div>
         {!timeline || timeline.length === 0 ? (
-          <p style={{ fontSize: 12, color: 'var(--ink-dim)' }}>No activity recorded yet.</p>
+          <p style={{ fontSize: 12, color: 'var(--ink-dim)' }}>{t('detail.noActivity')}</p>
         ) : (
           <ol data-testid="timeline" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
             {timeline.map((event) => (
               <li key={event.id} style={{ borderLeft: '2px solid var(--border)', paddingLeft: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                   <span style={{ fontSize: 11, color: 'var(--ink)', fontWeight: 600 }}>
-                    {humaniseEvent(event.event_type)}
+                    {eventLabel(event.event_type, lang)}
                   </span>
                   <span style={{ fontSize: 10, color: 'var(--ink-faint)', flexShrink: 0 }}>
                     {formatWhen(event.created_at)}
                   </span>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--ink-dim)', marginTop: 2 }}>
-                  {event.actor || 'system'}
-                  {event.old_status && event.new_status ? ` · ${event.old_status} → ${event.new_status}` : ''}
+                  {event.actor || t('detail.system')}
+                  {event.old_status && event.new_status ? ` · ${statusLabel(event.old_status, lang)} → ${statusLabel(event.new_status, lang)}` : ''}
                 </div>
                 {event.note && (
                   <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 4, lineHeight: 1.5 }}>

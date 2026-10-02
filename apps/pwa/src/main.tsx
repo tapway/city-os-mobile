@@ -9,7 +9,11 @@ import { TicketsPage } from './routes/tickets';
 import { TicketDetailPage } from './routes/ticket.$id';
 import { AttendancePage } from './routes/attendance';
 import { CreateTicketPage } from './routes/create-ticket';
+import { initLang } from './i18n';
 import './styles.css';
+
+// Language from localStorage (default EN) + <html lang>, before first render.
+initLang();
 
 // Start MSW in dev mode only when VITE_USE_MOCKS is set
 if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {

@@ -9,19 +9,23 @@
  * kept in controller state.
  */
 import { setAccessToken } from './auth';
+import { t } from '../i18n';
 
 export type AuthMode = 'password' | 'pkce';
 
-/** Plain English for now; M4 adds BM and can key off these status codes. */
+/**
+ * Sign-in error messages by HTTP status. Getters, so each read is translated
+ * into the language active at that moment (EN/BM).
+ */
 export const LOGIN_ERRORS = {
-  401: 'Incorrect username or password. Check them and try again.',
-  403: 'This account is not fully set up yet. Ask an administrator to finish setting it up in Keycloak.',
-  422: 'Enter both your username and your password.',
-  429: 'Too many sign-in attempts. Wait a minute, then try again.',
-  503: 'Sign-in is unavailable right now. Check your connection and try again shortly.',
-} as const;
+  get 401() { return t('login.error.401'); },
+  get 403() { return t('login.error.403'); },
+  get 422() { return t('login.error.422'); },
+  get 429() { return t('login.error.429'); },
+  get 503() { return t('login.error.503'); },
+};
 
-const GENERIC_ERROR = 'Sign-in failed. Please try again.';
+const genericError = () => t('login.error.generic');
 
 export async function fetchAuthMode(): Promise<AuthMode> {
   try {
@@ -61,12 +65,12 @@ export async function submitPasswordLogin(username: string, password: string): P
     } catch {
       // fall through
     }
-    return { ok: false, message: GENERIC_ERROR };
+    return { ok: false, message: genericError() };
   }
 
   const known = LOGIN_ERRORS[resp.status as keyof typeof LOGIN_ERRORS];
   if (known) return { ok: false, message: known };
-  return { ok: false, message: resp.status >= 500 ? LOGIN_ERRORS[503] : GENERIC_ERROR };
+  return { ok: false, message: resp.status >= 500 ? LOGIN_ERRORS[503] : genericError() };
 }
 
 export interface LoginState {
@@ -107,7 +111,7 @@ export function createPasswordLoginController({ submit, onSuccess }: ControllerD
       try {
         result = await submit(username.trim(), password);
       } catch {
-        result = { ok: false, message: GENERIC_ERROR };
+        result = { ok: false, message: genericError() };
       }
       if (result.ok) {
         set({ busy: false, error: null });
