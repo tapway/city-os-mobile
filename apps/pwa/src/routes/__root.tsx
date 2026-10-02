@@ -3,6 +3,7 @@ import { List, Clock, Plus, LogOut } from 'lucide-react';
 import { logout } from '../lib/auth';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useOfflineSync } from '../hooks/useOfflineSync';
+import { syncNotice } from '../lib/offline-queue';
 import { useLang } from '../i18n/react';
 import { LanguageToggle } from '../i18n/LanguageToggle';
 
@@ -22,10 +23,11 @@ const NAV_LABEL_STYLE = {
 };
 
 export function RootLayout() {
-  const { t } = useLang();
+  const { t, tm } = useLang();
   const location = useLocation();
   const online = useOnlineStatus();
-  const { pending, syncing } = useOfflineSync();
+  const { pending, syncing, lastResult } = useOfflineSync();
+  const droppedNotice = syncNotice(lastResult);
   const isLogin = location.pathname === '/login';
   const isActive = (path: string) =>
     path === '/tickets'
@@ -70,6 +72,17 @@ export function RootLayout() {
         </header>
       )}
       <main className="app-content">
+        {!isLogin && droppedNotice && (
+          <div
+            role="alert"
+            style={{
+              padding: '8px 16px', background: 'rgba(239,68,68,0.12)', borderBottom: '1px solid var(--border)',
+              fontSize: 12, color: 'var(--danger)',
+            }}
+          >
+            {tm(droppedNotice)}
+          </div>
+        )}
         {!isLogin && (!online || pending > 0) && (
           <div
             role="status"

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
+import { deleteImage } from '../lib/help-api';
 import {
   getQueue,
   syncQueue,
@@ -16,6 +18,7 @@ import { useOnlineStatus } from './useOnlineStatus';
  */
 export function useOfflineSync() {
   const online = useOnlineStatus();
+  const queryClient = useQueryClient();
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [lastResult, setLastResult] = useState<SyncResult | null>(null);
@@ -32,13 +35,21 @@ export function useOfflineSync() {
     if (!navigator.onLine) return;
     setSyncing(true);
     try {
-      const result = await syncQueue((url, init) => apiFetch(url, init));
+      const result = await syncQueue((url, init) => apiFetch(url, init), {
+        deleteEvidence: deleteImage,
+      });
       setLastResult(result);
+      // Replayed (or rejected) updates changed what the server holds.
+      if (result.synced + result.dropped > 0) {
+        void queryClient.invalidateQueries({ queryKey: ['ticket'] });
+        void queryClient.invalidateQueries({ queryKey: ['timeline'] });
+        void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      }
       await refreshCount();
     } finally {
       setSyncing(false);
     }
-  }, [refreshCount]);
+  }, [refreshCount, queryClient]);
 
   useEffect(() => {
     refreshCount();

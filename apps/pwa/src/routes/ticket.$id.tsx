@@ -17,7 +17,7 @@ import {
 import { getActor } from '../lib/auth';
 import { ApiError, isOfflineError } from '../lib/api';
 import { enqueueMutation } from '../lib/offline-queue';
-import { actionButtons, buildActionUpdate, type FieldAction } from '../lib/ticket-actions';
+import { actionButtons, buildActionUpdate, staleConflictMessage, type FieldAction } from '../lib/ticket-actions';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
 import { useLang } from '../i18n/react';
@@ -141,6 +141,14 @@ export function TicketDetailPage() {
     },
     onError: (err: Error) => {
       setNotice(null);
+      const stale = staleConflictMessage(err);
+      if (stale) {
+        // The ticket changed under us: refetch so the buttons match the server.
+        queryClient.invalidateQueries({ queryKey: ['ticket', ticketUid] });
+        queryClient.invalidateQueries({ queryKey: ['timeline', ticketUid] });
+        setFormError(stale);
+        return;
+      }
       setFormError(msgOf(err));
     },
   });

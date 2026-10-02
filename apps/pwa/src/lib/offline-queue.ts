@@ -1,4 +1,6 @@
 import { openDB, type IDBPDatabase } from 'idb';
+import { ApiError } from './api';
+import type { Msg } from '../i18n';
 
 export interface QueuedMutation {
   id?: number;
@@ -74,6 +76,35 @@ export interface SyncResult {
   dropped: number;
 }
 
+/**
+ * Drop or retry a queued update that failed with `status` (0 = never reached the server).
+ *
+ * Only a permanent rejection of the content is dropped. 408 and 429 are
+ * transient. A 401 is retried until the auth layer has refreshed the token; one
+ * that persists after the refresh will not fix itself, so it is dropped.
+ */
+export function classifyFailure(status: number, opts: { refreshed?: boolean } = {}): 'drop' | 'retry' {
+  if (status === 401) return opts.refreshed ? 'drop' : 'retry';
+  if (status === 408 || status === 429) return 'retry';
+  return status >= 400 && status < 500 ? 'drop' : 'retry';
+}
+
+/** The notice to show for a sync result, or null when nothing was rejected. */
+export function syncNotice(result: SyncResult | null): Msg | null {
+  if (!result || result.dropped <= 0) return null;
+  return { key: 'offline.dropped', vars: { n: result.dropped } };
+}
+
+export interface SyncOptions {
+  /** Remove an evidence object that a dropped update had already uploaded. */
+  deleteEvidence?: (url: string) => Promise<void>;
+}
+
+function evidenceOf(item: QueuedMutation): string[] {
+  const urls = (item.body as { image_urls?: unknown } | null)?.image_urls;
+  return Array.isArray(urls) ? urls.filter((u): u is string => typeof u === 'string') : [];
+}
+
 /** Flush guard so two triggers (reconnect + focus) never replay twice. */
 let syncing = false;
 
@@ -84,12 +115,14 @@ export function isSyncing(): boolean {
 /**
  * Replay queued mutations through the provided auth-aware fetch.
  *
- * A 4xx is a permanent rejection — retrying forever would block the queue
- * behind a request that can never succeed — so those entries are dropped and
- * counted separately. 5xx and network errors stay queued for the next attempt.
+ * `apiFetch` throws an ApiError on any non-2xx (after its own 401 refresh), so
+ * failures arrive as exceptions as well as responses. See classifyFailure for
+ * what is dropped (counted separately, evidence cleaned up) and what stays
+ * queued for the next attempt.
  */
 export async function syncQueue(
   fetchFn: (url: string, init: RequestInit) => Promise<Response>,
+  opts: SyncOptions = {},
 ): Promise<SyncResult> {
   if (syncing) return { synced: 0, failed: 0, dropped: 0 };
   syncing = true;
@@ -100,22 +133,34 @@ export async function syncQueue(
     let dropped = 0;
 
     for (const item of queue) {
+      // A thrown ApiError has already been through apiFetch's refresh; a bare
+      // response has not.
+      let status: number;
+      let refreshed = false;
       try {
         const resp = await fetchFn(item.url, {
           method: item.method,
           body: JSON.stringify(item.body),
           headers: { 'Content-Type': 'application/json' },
         });
-        if (resp.ok && item.id !== undefined) {
-          await removeFromQueue(item.id);
+        if (resp.ok) {
+          if (item.id !== undefined) await removeFromQueue(item.id);
           synced++;
-        } else if (resp.status >= 400 && resp.status < 500 && item.id !== undefined) {
-          await removeFromQueue(item.id);
-          dropped++;
-        } else {
-          failed++;
+          continue;
         }
-      } catch {
+        status = resp.status;
+      } catch (err) {
+        status = err instanceof ApiError ? err.status : 0;
+        refreshed = err instanceof ApiError;
+      }
+
+      if (item.id !== undefined && classifyFailure(status, { refreshed }) === 'drop') {
+        await removeFromQueue(item.id);
+        dropped++;
+        if (opts.deleteEvidence) {
+          await Promise.all(evidenceOf(item).map((u) => opts.deleteEvidence!(u).catch(() => undefined)));
+        }
+      } else {
         failed++;
       }
     }

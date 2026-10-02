@@ -7,7 +7,8 @@
  * a button only when the matching `action` is in that list.
  */
 import { actionPath, type StatusUpdate } from './help-api';
-import type { MessageKey } from '../i18n';
+import { ApiError } from './api';
+import type { MessageKey, Msg } from '../i18n';
 
 export type FieldAction = 'accept' | 'start' | 'resume' | 'complete' | 'need_support';
 
@@ -78,4 +79,9 @@ export function buildActionUpdate(
     image_urls: fix.image_urls,
     client_request_id: crypto.randomUUID(),
   };
+}
+
+/** A 409 means the ticket moved on under the officer; show a translated message, not the server text. */
+export function staleConflictMessage(err: unknown): Msg | null {
+  return err instanceof ApiError && err.status === 409 ? { key: 'detail.err.stale' } : null;
 }
