@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createRouter, createRootRoute, createRoute, redirect } from '@tanstack/react-router';
-import { bootstrapSession, initFromCallbackFragment } from './lib/auth';
+import { ensureSession, initFromCallbackFragment } from './lib/auth';
 import { RootLayout } from './routes/__root';
 import { LoginPage } from './routes/login';
 import { TicketsPage } from './routes/tickets';
@@ -19,20 +19,6 @@ if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
 
 // Check for OAuth callback fragment on first load
 initFromCallbackFragment();
-
-/**
- * Session bootstrap, resolved once per page load.
- *
- * Screens must not decide "signed out" from the in-memory token alone: after a
- * reload or a phone waking up, the memory is empty but the HttpOnly refresh
- * cookie may still be valid. Awaiting this first means a returning user lands
- * straight on their tickets instead of being bounced to the login screen.
- */
-let sessionPromise: Promise<boolean> | null = null;
-function ensureSession(): Promise<boolean> {
-  if (!sessionPromise) sessionPromise = bootstrapSession();
-  return sessionPromise;
-}
 
 async function requireAuth(search: { returnTo?: string }): Promise<void> {
   const ok = await ensureSession();

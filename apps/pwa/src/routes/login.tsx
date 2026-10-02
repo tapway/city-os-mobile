@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { Button } from '@city-os/ui';
-import { bootstrapSession, loginRedirect } from '../lib/auth';
+import { bootstrapSession, loginRedirect, markSignedIn } from '../lib/auth';
 import { fetchAuthMode, type AuthMode } from '../lib/password-login';
 import { PasswordLoginForm } from './password-login-form';
 
@@ -33,6 +33,9 @@ export function LoginPage() {
   // Same routing as a returning session: bootstrapSession() reads the identity
   // the BFF just stored, then we go where the user was headed.
   const afterPasswordLogin = () => {
+    // requireAuth cached "signed out" before the form was submitted; replace it
+    // or the guard bounces straight back here.
+    markSignedIn(true);
     void bootstrapSession().then(() => navigate({ to: (search.returnTo as never) || '/tickets' }));
   };
 

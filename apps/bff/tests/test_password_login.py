@@ -295,3 +295,14 @@ def test_allowlisted_origin_is_accepted():
 def test_absent_origin_is_accepted():
     respx.post(_token_url()).mock(return_value=httpx.Response(200, json=_ok_tokens()))
     assert _post(TestClient(app)).status_code == 200
+
+
+@respx.mock
+def test_token_bearing_responses_are_not_cacheable():
+    respx.post(_token_url()).mock(return_value=httpx.Response(200, json=_ok_tokens()))
+    client = TestClient(app)
+    assert _post(client).headers["cache-control"] == "no-store"
+    client.cookies.set("refresh_token", "r")
+    refreshed = client.post("/auth/refresh")
+    assert refreshed.status_code == 200
+    assert refreshed.headers["cache-control"] == "no-store"

@@ -243,6 +243,7 @@ def _token_response(access_token: str, expires_in: int, refresh_token: str | Non
         media_type="application/json",
         status_code=200,
     )
+    response.headers["Cache-Control"] = "no-store"
     _set_refresh_cookie(response, refresh_token)
     return response
 
@@ -419,5 +420,6 @@ async def password_login(request: Request):
     response = Response(
         content=json.dumps(body), media_type="application/json", status_code=200
     )
+    response.headers["Cache-Control"] = "no-store"
     _set_session_cookies(response, tokens)
     return response
