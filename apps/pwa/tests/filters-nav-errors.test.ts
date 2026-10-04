@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { listTicketsQuery } from '../src/lib/help-api';
-import { TICKET_FILTERS, defaultTicketFilter } from '../src/lib/ticket-filters';
+import { TICKET_FILTERS, defaultTicketFilter, filterTestId } from '../src/lib/ticket-filters';
 import { canCreateTickets } from '../src/lib/permissions';
 import { errorDetail, ApiError, toApiErrorFromText } from '../src/lib/api';
 import { translateMsg, msgOf, translate, initLang, setLang } from '../src/i18n';
@@ -15,6 +15,8 @@ describe('I4: To accept filter', () => {
   it('is a filter with the M7 test id source and state=dispatch', () => {
     const f = TICKET_FILTERS.find((x) => x.id === 'to_accept');
     expect(f).toMatchObject({ state: 'dispatch', labelKey: 'tickets.filter.toAccept' });
+    expect(filterTestId(f!)).toBe('tickets-filter-to-accept');
+    expect(filterTestId(TICKET_FILTERS.find((x) => x.id === 'mine')!)).toBe('tickets-filter-mine');
     expect(en['tickets.filter.toAccept']).toBeTruthy();
     expect(ms['tickets.filter.toAccept']).toBeTruthy();
   });

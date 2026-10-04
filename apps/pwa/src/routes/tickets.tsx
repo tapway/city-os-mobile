@@ -5,7 +5,7 @@ import { Search, RefreshCw, MapPin, X } from 'lucide-react';
 import { Badge } from '@city-os/ui';
 import { listTickets, type TicketListItem } from '../lib/help-api';
 import { getAccessToken, getSessionUser } from '../lib/auth';
-import { TICKET_FILTERS as FILTERS, defaultTicketFilter } from '../lib/ticket-filters';
+import { TICKET_FILTERS as FILTERS, defaultTicketFilter, filterTestId } from '../lib/ticket-filters';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateTime } from '../i18n/format';
@@ -158,7 +158,7 @@ export function TicketsPage() {
             key={f.id}
             type="button"
             onClick={() => setChosenFilter(f.id)}
-            data-testid={`tickets-filter-${f.id}`}
+            data-testid={filterTestId(f)}
             aria-pressed={f.id === activeFilter.id}
             style={{
               flexShrink: 0, padding: '6px 12px', fontSize: 10, fontFamily: 'var(--font-label)',

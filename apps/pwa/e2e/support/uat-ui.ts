@@ -6,6 +6,7 @@
  * TEST IDS THE PWA MUST EXPOSE (M1/M2 add them; the spec fails fast naming the
  * missing one):
  *   tickets-filter-mine            the "Mine" filter chip on /tickets
+ *   tickets-filter-to-accept       the "To accept" filter chip (state=dispatch)
  *   ticket-card                    (exists) one card per ticket
  *   ticket-gps-get                 the "Get GPS" button on /tickets/$id
  *   ticket-action-accept|start|resume|complete|need_support   action buttons from available_actions
@@ -17,6 +18,7 @@ import { UAT_PW, JB } from './uat-env';
 
 export const ids = {
   mine: 'tickets-filter-mine',
+  toAccept: 'tickets-filter-to-accept',
   card: 'ticket-card',
   gps: 'ticket-gps-get',
   addPhoto: 'ticket-add-photo',

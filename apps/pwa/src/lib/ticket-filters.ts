@@ -9,7 +9,11 @@ export interface TicketFilter {
   state?: string;
 }
 
-/** Test ids are `tickets-filter-{id}`: mine, to_accept, all, ... */
+/** M7 test id: `tickets-filter-{id with - for _}` (mine, to-accept, in-progress, ...). */
+export function filterTestId(f: TicketFilter): string {
+  return `tickets-filter-${f.id.replace(/_/g, '-')}`;
+}
+
 export const TICKET_FILTERS: TicketFilter[] = [
   { id: 'to_accept', labelKey: 'tickets.filter.toAccept', state: 'dispatch' },
   { id: 'mine', labelKey: 'tickets.filter.mine', assignee: 'me' },

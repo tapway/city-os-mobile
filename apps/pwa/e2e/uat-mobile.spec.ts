@@ -21,7 +21,7 @@ import {
 } from './support/uat-env';
 import {
   createDispatchedTicket, acceptAsEngineer, startAsEngineer, closeTicket,
-  detail, timeline, call, tokenFor, storagePath, type UatTicket,
+  detail, timeline, legacyTimeline, call, tokenFor, storagePath, type UatTicket,
 } from './support/uat-api';
 import {
   ids, signIn, openTicket, lockGps, isStatusPatch, parseUpdate, expectJohorBahru, testPng,
@@ -230,8 +230,12 @@ test.describe('MOBILE UAT', () => {
     await page.waitForTimeout(5_000);
     const tl = await timeline('engineer', t.uid);
     expect(tl.filter((e) => e.from_state === 'accepted' && e.to_state === 'in_progress')).toHaveLength(1);
-    const keys = tl.map((e) => e.client_request_id).filter((k): k is string => !!k);
-    expect(new Set(keys).size, 'client_request_id not duplicated in the timeline').toBe(keys.length);
+    // Exactly-once on the legacy timeline: one ASSIGNED -> IN_PROGRESS status change, however many replays.
+    const legacy = await legacyTimeline('engineer', t.uid);
+    expect(
+      legacy.filter((e) => e.old_status === 'ASSIGNED' && e.new_status === 'IN_PROGRESS'),
+      'one ASSIGNED -> IN_PROGRESS status-change event',
+    ).toHaveLength(1);
     expect(ids_seen.size, 'one logical update, one client_request_id').toBeLessThanOrEqual(1);
   });
 });

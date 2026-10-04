@@ -61,6 +61,7 @@ export interface Detail {
   title: string;
   status: string;
   workflow_state: string | null;
+  department_id?: number | null;
   assigned_to?: string | null;
   image_urls?: string[] | null;
   attachments?: Array<{ url?: string; object_key?: string; content_type?: string; kind?: string; filename?: string }>;
@@ -75,6 +76,13 @@ export const detail = (role: Role, uid: string) =>
   must<Detail>(`detail ${uid}`, call<Detail>(role, 'GET', `/api/v1/events/${uid}`));
 export const timeline = (role: Role, uid: string) =>
   must<TimelineEntry[]>(`timeline ${uid}`, call<TimelineEntry[]>(role, 'GET', `/api/v1/events/${uid}/timeline`));
+/** Legacy timeline (what the PWA shows): status changes carry old_status/new_status in legacy status names. */
+export interface LegacyTimelineEvent {
+  id: number; event_type: string; old_status: string | null; new_status: string | null;
+  actor: string | null; note: string | null;
+}
+export const legacyTimeline = (role: Role, uid: string) =>
+  must<LegacyTimelineEvent[]>(`legacy timeline ${uid}`, call<LegacyTimelineEvent[]>(role, 'GET', `/api/tickets/${uid}/timeline`));
 export const act = (role: Role, uid: string, action: string, body: Record<string, unknown> = {}) =>
   must<Detail>(`${role} ${action} ${uid}`, call<Detail>(role, 'POST', `/api/v1/events/${uid}/actions/${action}`, body));
 
@@ -82,8 +90,8 @@ export interface UatTicket { uid: string; title: string }
 
 /**
  * Create a ticket as `operator` and take it to `dispatch` for the engineer's
- * department: confirm, then submit (the auto-rule routes TRF1A to KEJURUTERAAN),
- * falling back to dispatcher `assign_department` if the rule did not route it.
+ * department: confirm, then submit (the auto-rule routes TRF1A to KEJURUTERAAN,
+ * department_id 4, which is asserted).
  * Actions are only attempted when the server offers them in `available_actions`.
  */
 export async function createDispatchedTicket(label: string): Promise<UatTicket> {
@@ -108,12 +116,12 @@ export async function createDispatchedTicket(label: string): Promise<UatTicket> 
     }
   }
   if (d.workflow_state !== 'dispatch') {
-    // The auto-rule did not route it: dispatch to KEJURUTERAAN explicitly.
-    await act('dispatcher', uid, 'assign_department', { fields: { department_id: KEJURUTERAAN_DEPT_ID } });
-    d = await detail('operator', uid);
-  }
-  if (d.workflow_state !== 'dispatch') {
     throw new Error(`ticket ${uid} did not reach dispatch (state=${d.workflow_state})`);
+  }
+  // The auto-rule must have routed it to the engineer's department; there is no
+  // manual assign fallback, so a mis-routed ticket fails here, not later in a test.
+  if (d.department_id !== KEJURUTERAAN_DEPT_ID) {
+    throw new Error(`ticket ${uid} routed to department ${d.department_id}, expected ${KEJURUTERAAN_DEPT_ID}`);
   }
   return { uid, title };
 }
