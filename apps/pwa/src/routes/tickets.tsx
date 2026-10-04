@@ -4,9 +4,13 @@ import { useEffect, useState } from 'react';
 import { Search, RefreshCw, MapPin, X } from 'lucide-react';
 import { Badge } from '@city-os/ui';
 import { listTickets, type TicketListItem } from '../lib/help-api';
-import { getAccessToken } from '../lib/auth';
+import { getAccessToken, getSessionUser } from '../lib/auth';
+import { TICKET_FILTERS as FILTERS, defaultTicketFilter, filterTestId } from '../lib/ticket-filters';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { formatDateTime } from '../i18n/format';
+import { useLang } from '../i18n/react';
+import { statusLabel } from '../i18n/labels';
 
 const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
   OPEN: 'warning',
@@ -17,34 +21,16 @@ const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger
   CLOSED: 'default',
 };
 
-const FILTERS: { label: string; statuses?: string[] }[] = [
-  { label: 'All' },
-  { label: 'Open', statuses: ['OPEN'] },
-  { label: 'Assigned', statuses: ['ASSIGNED', 'VERIFIED'] },
-  { label: 'In progress', statuses: ['IN_PROGRESS'] },
-  { label: 'Resolved', statuses: ['RESOLVED'] },
-  { label: 'Closed', statuses: ['CLOSED'] },
-];
-
-function formatWhen(value: string | null): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString(undefined, {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 export function TicketsPage() {
+  const { t, lang } = useLang();
   const navigate = useNavigate();
   const online = useOnlineStatus();
   const [search, setSearch] = useState('');
-  const [filterIndex, setFilterIndex] = useState(0);
+  // null = the user has not chosen: Mine for handling staff, All for others.
+  const [chosenFilter, setChosenFilter] = useState<string | null>(null);
   const debouncedSearch = useDebouncedValue(search, 300);
-  const activeFilter = FILTERS[filterIndex] ?? FILTERS[0]!;
+  const activeId = chosenFilter ?? defaultTicketFilter(getSessionUser()?.roles);
+  const activeFilter = FILTERS.find((f) => f.id === activeId) ?? FILTERS[0]!;
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -53,11 +39,13 @@ export function TicketsPage() {
   }, [navigate]);
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
-    queryKey: ['tickets', debouncedSearch, activeFilter.label],
+    queryKey: ['tickets', debouncedSearch, activeFilter.id],
     queryFn: () =>
       listTickets({
         q: debouncedSearch,
         status: activeFilter.statuses,
+        assignee: activeFilter.assignee,
+        state: activeFilter.state,
         limit: 50,
       }),
     enabled: !!getAccessToken(),
@@ -73,12 +61,12 @@ export function TicketsPage() {
       style={{ padding: '12px 16px', marginBottom: 12, marginTop: -16, marginLeft: -16, marginRight: -16 }}
     >
       <div className="flex items-center justify-between">
-        <h1 className="hud-title" style={{ margin: 0 }}>Tickets</h1>
+        <h1 className="hud-title" style={{ margin: 0 }}>{t('tickets.title')}</h1>
         <button
           type="button"
           onClick={() => refetch()}
           disabled={isFetching}
-          aria-label="Refresh ticket list"
+          aria-label={t('tickets.refreshAria')}
           style={{
             display: 'flex', alignItems: 'center', gap: 6, background: 'transparent',
             border: '1px solid var(--border)', color: 'var(--cyan)', borderRadius: 2,
@@ -87,11 +75,11 @@ export function TicketsPage() {
           }}
         >
           <RefreshCw size={13} className={isFetching ? 'animate-spin' : undefined} />
-          {isFetching ? 'Loading' : 'Refresh'}
+          {isFetching ? t('tickets.loading') : t('tickets.refresh')}
         </button>
       </div>
       <div style={{ fontSize: 10, color: 'var(--ink-dim)', fontFamily: 'var(--font-label)', marginTop: 4 }}>
-        {isLoading ? 'Loading…' : `${tickets.length} of ${total} shown`}
+        {isLoading ? t('tickets.loading') : t('tickets.count', { shown: tickets.length, total })}
       </div>
     </div>
   );
@@ -107,7 +95,7 @@ export function TicketsPage() {
           style={{ padding: '8px 12px', marginBottom: 12, borderColor: 'rgba(239,68,68,0.4)' }}
         >
           <p style={{ color: 'var(--danger)', fontSize: 11 }}>
-            You are offline — showing the last loaded list.
+            {t('offline.listNotice')}
           </p>
         </div>
       )}
@@ -115,7 +103,7 @@ export function TicketsPage() {
       {/* Search */}
       <div className="glass-panel" style={{ padding: '10px 12px', marginBottom: 10 }}>
         <label htmlFor="ticket-search" className="hud-label" style={{ display: 'block', marginBottom: 6 }}>
-          Search tickets
+          {t('tickets.searchLabel')}
         </label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Search size={15} style={{ color: 'var(--ink-dim)', flexShrink: 0 }} />
@@ -124,7 +112,7 @@ export function TicketsPage() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Title, e.g. pothole or Jalan Meldrum"
+            placeholder={t('tickets.searchPlaceholder')}
             autoComplete="off"
             style={{
               flex: 1, background: 'var(--bg-deep)', border: '1px solid var(--border)',
@@ -136,7 +124,7 @@ export function TicketsPage() {
             <button
               type="button"
               onClick={() => setSearch('')}
-              aria-label="Clear search"
+              aria-label={t('tickets.searchClear')}
               style={{ background: 'none', border: 'none', color: 'var(--ink-dim)', cursor: 'pointer' }}
             >
               <X size={16} />
@@ -148,24 +136,25 @@ export function TicketsPage() {
       {/* Status filters */}
       <div
         role="group"
-        aria-label="Filter by status"
+        aria-label={t('tickets.filterAria')}
         style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 4 }}
       >
-        {FILTERS.map((f, i) => (
+        {FILTERS.map((f) => (
           <button
-            key={f.label}
+            key={f.id}
             type="button"
-            onClick={() => setFilterIndex(i)}
-            aria-pressed={i === filterIndex}
+            onClick={() => setChosenFilter(f.id)}
+            data-testid={filterTestId(f)}
+            aria-pressed={f.id === activeFilter.id}
             style={{
               flexShrink: 0, padding: '6px 12px', fontSize: 10, fontFamily: 'var(--font-label)',
               textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', borderRadius: 2,
-              border: `1px solid ${i === filterIndex ? 'var(--cyan)' : 'var(--border)'}`,
-              background: i === filterIndex ? 'rgba(61,232,255,0.1)' : 'transparent',
-              color: i === filterIndex ? 'var(--cyan)' : 'var(--ink-dim)',
+              border: `1px solid ${f.id === activeFilter.id ? 'var(--cyan)' : 'var(--border)'}`,
+              background: f.id === activeFilter.id ? 'rgba(61,232,255,0.1)' : 'transparent',
+              color: f.id === activeFilter.id ? 'var(--cyan)' : 'var(--ink-dim)',
             }}
           >
-            {f.label}
+            {t(f.labelKey)}
           </button>
         ))}
       </div>
@@ -174,7 +163,7 @@ export function TicketsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {[1, 2, 3].map((i) => (
             <div key={i} className="glass-panel" style={{ padding: 16, height: 80, opacity: 0.3 }}>
-              <div style={{ fontSize: 12, color: 'var(--ink-dim)' }}>Loading…</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-dim)' }}>{t('tickets.loading')}</div>
             </div>
           ))}
         </div>
@@ -183,7 +172,7 @@ export function TicketsPage() {
       {error && !isLoading && (
         <div className="glass-panel" style={{ padding: 16, borderColor: 'rgba(239,68,68,0.4)' }}>
           <p role="alert" style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 10 }}>
-            Could not load tickets: {(error as Error).message}
+            {t('tickets.loadError', { message: (error as Error).message })}
           </p>
           <button
             type="button"
@@ -194,7 +183,7 @@ export function TicketsPage() {
               border: '1px solid var(--cyan)', color: 'var(--cyan)', background: 'transparent', borderRadius: 2,
             }}
           >
-            Try again
+            {t('tickets.retry')}
           </button>
         </div>
       )}
@@ -209,10 +198,14 @@ export function TicketsPage() {
           <div style={{ fontSize: 36, opacity: 0.3 }} aria-hidden="true">📋</div>
           <p style={{ color: 'var(--ink-dim)', fontSize: 13, textAlign: 'center' }}>
             {searching
-              ? `No tickets match “${debouncedSearch.trim()}”.`
-              : activeFilter.statuses
-                ? `No tickets with status ${activeFilter.label.toLowerCase()}.`
-                : 'No tickets to show.'}
+              ? t('tickets.emptySearch', { query: debouncedSearch.trim() })
+              : activeFilter.state
+                ? t('tickets.emptyToAccept')
+                : activeFilter.assignee
+                ? t('tickets.emptyMine')
+                : activeFilter.statuses
+                ? t('tickets.emptyFilter', { status: t(activeFilter.labelKey).toLowerCase() })
+                : t('tickets.empty')}
           </p>
         </div>
       )}
@@ -233,7 +226,7 @@ export function TicketsPage() {
                     {ticket.title}
                   </div>
                   <Badge variant={STATUS_VARIANT[ticket.status] || 'default'}>
-                    {ticket.status.replace('_', ' ')}
+                    {statusLabel(ticket.status, lang)}
                   </Badge>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 11, color: 'var(--ink-faint)' }}>
@@ -246,7 +239,7 @@ export function TicketsPage() {
                       {ticket.location_desc}
                     </span>
                   )}
-                  {ticket.created_at && <span>{formatWhen(ticket.created_at)}</span>}
+                  {ticket.created_at && <span>{formatDateTime(ticket.created_at, lang)}</span>}
                 </div>
               </Link>
             </li>

@@ -52,6 +52,8 @@ export interface TicketDetail extends TicketListItem {
   resolved_at: string | null;
   closed_at: string | null;
   sla_timers?: unknown;
+  /** Server-computed; entries are objects with an `action` key (see ticket-actions.ts). */
+  available_actions?: { action: string; label?: string }[];
 }
 
 /** The list endpoint returns an envelope, never a bare array. */
@@ -68,21 +70,31 @@ export interface ListTicketsParams {
   source?: string;
   incident_type?: string;
   lane?: string;
+  /** `me` = tickets assigned to the caller (server resolves the identity). */
+  assignee?: 'me';
+  /** workflow_state, e.g. `dispatch` (waiting to be accepted). */
+  state?: string;
   limit?: number;
   offset?: number;
 }
 
-export async function listTickets(params: ListTicketsParams = {}): Promise<TicketPage> {
+/** Query string for the event list, as data so it can be unit-tested. */
+export function listTicketsQuery(params: ListTicketsParams = {}): string {
   const search = new URLSearchParams();
   if (params.q?.trim()) search.set('q', params.q.trim());
   if (params.status?.length) search.set('status', params.status.join(','));
   if (params.source) search.set('source', params.source);
   if (params.incident_type) search.set('incident_type', params.incident_type);
   if (params.lane) search.set('lane', params.lane);
+  if (params.assignee) search.set('assignee', params.assignee);
+  if (params.state) search.set('state', params.state);
   search.set('limit', String(params.limit ?? 25));
   search.set('offset', String(params.offset ?? 0));
+  return search.toString();
+}
 
-  const page = await apiJson<TicketPage>(`/api/v1/events?${search.toString()}`);
+export async function listTickets(params: ListTicketsParams = {}): Promise<TicketPage> {
+  const page = await apiJson<TicketPage>(`/api/v1/events?${listTicketsQuery(params)}`);
   // Defensive: older deployments returned a bare array.
   if (Array.isArray(page)) {
     const items = page as unknown as TicketListItem[];
@@ -172,9 +184,25 @@ export function statusUpdateRequest(
   };
 }
 
+/** Send an already-built status request (see statusUpdateRequest). */
+export async function sendStatusRequest(request: { path: string; body: Record<string, unknown> }): Promise<TicketDetail> {
+  return apiJson<TicketDetail>(request.path, { method: 'PATCH', body: JSON.stringify(request.body) });
+}
+
 export async function updateTicketStatus(uid: string, update: StatusUpdate): Promise<TicketDetail> {
-  const { path, body } = statusUpdateRequest(uid, update);
-  return apiJson<TicketDetail>(path, { method: 'PATCH', body: JSON.stringify(body) });
+  return sendStatusRequest(statusUpdateRequest(uid, update));
+}
+
+export function actionPath(uid: string, action: string): string {
+  return `/api/v1/events/${encodeURIComponent(uid)}/actions/${encodeURIComponent(action)}`;
+}
+
+/** Run a workflow action that has no status mapping (e.g. need_support). Online only. */
+export async function runTicketAction(uid: string, action: string, comment?: string): Promise<TicketDetail> {
+  return apiJson<TicketDetail>(actionPath(uid, action), {
+    method: 'POST',
+    body: JSON.stringify(comment ? { comment } : {}),
+  });
 }
 
 export interface CreateTicketBody {
@@ -202,39 +230,6 @@ export async function createTicket(body: CreateTicketBody): Promise<TicketDetail
 }
 
 // ------------------------------------------------------ workflows & metadata
-
-export interface WorkflowButton {
-  id: number;
-  status_name: string;
-  button_name: string;
-  trigger_name: string;
-  description: string | null;
-  sort_order: number | null;
-}
-
-export async function getWorkflowButtons(domain: string): Promise<WorkflowButton[]> {
-  const raw = await apiJson<WorkflowButton[]>(
-    `/api/v1/workflows/${encodeURIComponent(domain)}/buttons`,
-  );
-  return Array.isArray(raw) ? raw : [];
-}
-
-export interface TransitionBody {
-  trigger: string;
-  actor: string;
-  note?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export async function transitionTicket(
-  uid: string,
-  body: TransitionBody,
-): Promise<{ ticket_uid: string; workflow_state: string; status: string }> {
-  return apiJson(`/api/v1/events/${encodeURIComponent(uid)}/transition`, {
-    method: 'PATCH',
-    body: JSON.stringify(body),
-  });
-}
 
 export interface IncidentType {
   id: number;

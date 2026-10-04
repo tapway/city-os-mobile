@@ -6,6 +6,7 @@
  * 12h refresh cookie. `bootstrapSession()` is what turns that cookie back into
  * a usable session — screens must await it before deciding the user is signed out.
  */
+import { cachesToClear } from './cache-policy';
 
 let accessToken: string | null = null;
 let expiresAt = 0;
@@ -44,11 +45,14 @@ function rememberUser(token: string): void {
   const claims = decodeJwtPayload(token);
   if (!claims) return;
   const realmAccess = (claims.realm_access as { roles?: string[] } | undefined) || undefined;
+  // This realm's access token may omit preferred_username/sub; the identity
+  // hydrated from the BFF must survive a token refresh, not be reset to null.
+  const prev = currentUser;
   currentUser = {
-    sub: (claims.sub as string) ?? null,
-    name: (claims.name as string) ?? null,
-    username: (claims.preferred_username as string) ?? null,
-    roles: realmAccess?.roles ?? [],
+    sub: (claims.sub as string) ?? prev?.sub ?? null,
+    name: (claims.name as string) ?? prev?.name ?? null,
+    username: (claims.preferred_username as string) ?? prev?.username ?? null,
+    roles: realmAccess?.roles ?? prev?.roles ?? [],
   };
 }
 
@@ -158,6 +162,40 @@ export async function hydrateUser(): Promise<SessionUser | null> {
   }
 }
 
+/**
+ * Session bootstrap, resolved once per page load and cached.
+ *
+ * Screens must not decide "signed out" from the in-memory token alone: after a
+ * reload or a phone waking up, the memory is empty but the HttpOnly refresh
+ * cookie may still be valid. Awaiting this first means a returning user lands
+ * straight on their tickets instead of being bounced to the login screen.
+ */
+let sessionPromise: Promise<boolean> | null = null;
+
+export function ensureSession(): Promise<boolean> {
+  if (!sessionPromise) sessionPromise = bootstrapSession();
+  return sessionPromise;
+}
+
+/**
+ * Replace the cached session check. Sign-in without a page reload (password
+ * login) must call markSignedIn(true), or route guards keep reusing the
+ * "signed out" answer cached before the user typed their password. Sign-out
+ * calls markSignedIn(false), which drops the cache so the next check asks again.
+ */
+export function markSignedIn(signedIn: boolean): void {
+  sessionPromise = signedIn ? Promise.resolve(true) : null;
+  if (signedIn) for (const listener of [...signedInListeners]) listener();
+}
+
+const signedInListeners = new Set<() => void>();
+
+/** Run `listener` after each sign-in without a reload (e.g. to resume a paused sync). Returns an unsubscribe. */
+export function onSignedIn(listener: () => void): () => void {
+  signedInListeners.add(listener);
+  return () => void signedInListeners.delete(listener);
+}
+
 export function initFromCallbackFragment(): boolean {
   const hash = window.location.hash.slice(1);
   if (!hash) return false;
@@ -185,7 +223,7 @@ export function loginRedirect(): void {
   window.location.href = `/auth/login?${params.toString()}`;
 }
 
-/** Drop everything the service worker stored for this session.
+/** Drop the responses the service worker stored for this session (not the app-shell precache).
  *
  * Cache Storage is keyed by URL rather than by user, so a handset that changes
  * hands must not keep the previous officer's responses. The shell is
@@ -195,7 +233,7 @@ async function clearCachedResponses(): Promise<void> {
   if (typeof caches === 'undefined') return;
   try {
     const names = await caches.keys();
-    await Promise.all(names.map((name) => caches.delete(name)));
+    await Promise.all(cachesToClear(names).map((name) => caches.delete(name)));
   } catch {
     // Storage unavailable (private mode, quota) — nothing to clear.
   }
@@ -207,6 +245,7 @@ export async function logout(): Promise<void> {
   } finally {
     await clearCachedResponses();
     clearAccessToken();
+    markSignedIn(false);
     window.location.href = '/login';
   }
 }

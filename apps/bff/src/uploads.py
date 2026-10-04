@@ -59,8 +59,23 @@ def _require_bearer(authorization: str | None) -> str:
     return token
 
 
-async def _verify_token(token: str) -> None:
+UPLOADER_META = "uploader-sub"
+
+
+def _owner_of(stat) -> str | None:
+    """The uploader recorded on an object, whichever way the client spells the key."""
+    meta = getattr(stat, "metadata", None) or {}
+    for key, value in meta.items():
+        if str(key).lower().removeprefix("x-amz-meta-") == UPLOADER_META:
+            return str(value) or None
+    return None
+
+
+async def _verify_token(token: str) -> str:
     """Ask City Help whether this token is real before we store anything.
+
+    Returns the caller's identity (City Help's `id`, i.e. the token `sub`, else the
+    username; empty when the token carries neither) so an upload can be owned.
 
     Uploads do not pass through the proxy, so without this check any caller
     could fill the object store by inventing a bearer string.
@@ -78,6 +93,13 @@ async def _verify_token(token: str) -> None:
         # Do not treat an upstream 403/404 as a valid session.
         logger.warning("Upload auth check returned %s: %s", resp.status_code, resp.text[:200])
         raise HTTPException(resp.status_code, "Not allowed to upload evidence")
+    try:
+        me = resp.json()
+    except ValueError:
+        me = {}
+    if not isinstance(me, dict):  # a list/string/null body is not an identity
+        me = {}
+    return str(me.get("id") or me.get("username") or "")
 
 
 def _storage():
@@ -103,11 +125,12 @@ async def upload_evidence(
     authorization: str | None = Header(default=None),
 ):
     """Store one evidence photo and return the URL to attach to the ticket."""
+    # Authentication first: an anonymous caller gets 401 whatever the server's
+    # storage configuration is, and learns nothing about it.
+    token = _require_bearer(authorization)
     if not settings.uploads_enabled:
         raise HTTPException(503, "Image storage is not configured on this server")
-
-    token = _require_bearer(authorization)
-    await _verify_token(token)
+    uploader = await _verify_token(token)
 
     content_type = (file.content_type or "").lower().split(";")[0].strip()
     if content_type not in settings.allowed_upload_types_list:
@@ -141,6 +164,7 @@ async def upload_evidence(
             io.BytesIO(data),
             length=len(data),
             content_type=content_type,
+            metadata={UPLOADER_META: uploader} if uploader else None,
         )
     except HTTPException:
         raise
@@ -170,24 +194,39 @@ async def delete_evidence(
     to reach anything outside the uploads prefix.
     """
     token = _require_bearer(authorization)
-    await _verify_token(token)
+    caller = await _verify_token(token)
 
     if not object_key.startswith(f"{settings.uploads_prefix}/"):
         raise HTTPException(400, "Object is not an evidence upload")
 
-    def _remove() -> None:
+    def _remove() -> bool:
+        """Delete if the caller owns it; False when ownership forbids it."""
         client = _storage()
         if client is None:
-            return
+            return True
         try:
-            client.remove_object(settings.minio_bucket, object_key)
+            owner = _owner_of(client.stat_object(settings.minio_bucket, object_key))
         except Exception as exc:  # already gone, or storage unavailable
             logger.info("Evidence not deleted (%s): %s", object_key, exc)
+            return True
+        # Evidence urls are guessable once seen (a ticket's image_urls), so only
+        # the uploader may remove one. Objects with no recorded owner (uploaded
+        # before ownership was stored) are not deletable by anyone.
+        if not owner or not caller or owner != caller:
+            return False
+        try:
+            client.remove_object(settings.minio_bucket, object_key)
+        except Exception as exc:
+            logger.info("Evidence not deleted (%s): %s", object_key, exc)
+        return True
 
     try:
-        await asyncio.to_thread(_remove)
+        allowed = await asyncio.to_thread(_remove)
     except Exception as exc:
         logger.error("Evidence delete failed for %s: %s", object_key, exc)
+        allowed = True
+    if not allowed:
+        raise HTTPException(403, "Only the person who uploaded this evidence can delete it")
 
     return Response(status_code=204)
 

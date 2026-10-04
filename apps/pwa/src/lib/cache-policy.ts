@@ -22,3 +22,15 @@ export const STALE_CACHE_NAMES = ['api-cache'] as const;
 export function shouldBypassServiceWorkerCache(pathname: string): boolean {
   return BYPASS_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
+/** Workbox's precache buckets hold the app shell, not anyone's data. */
+const PRECACHE_PREFIX = 'workbox-precache';
+
+/**
+ * Cache names to delete on sign-out.
+ *
+ * Responses are keyed by URL, not user, so they go. The precache stays: it is the
+ * shell, and deleting it leaves the next offline launch with nothing to open.
+ */
+export function cachesToClear(names: readonly string[]): string[] {
+  return names.filter((n) => !n.startsWith(PRECACHE_PREFIX));
+}
