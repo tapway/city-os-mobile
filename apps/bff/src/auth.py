@@ -163,12 +163,13 @@ SESSION_USER_COOKIE = "session_user"
 def _identity_claims(tokens: dict) -> dict:
     """Who is signed in, taken from the tokens Keycloak just returned.
 
-    This realm's access token carries neither `preferred_username` nor `sub`
-    (only a display `name`), so a client cannot name the officer from it — and
-    the API needs an identifier it can persist, both on ticket events and as the
-    `user_refs` foreign key behind GPS/attendance logging. The ID token has the
-    claims and is already in hand here, so the identity is read from it and
-    handed to the app through /auth/me.
+    Used to tell the app who is signed in (/auth/me) without it decoding tokens.
+    The ID token is read first because it reliably carries `preferred_username`
+    and `sub`; the access token is the fallback and may omit them (this realm
+    once issued a display `name` only). City Help (rc2) no longer trusts an
+    actor sent by the client: it derives the actor from the bearer token itself,
+    so this identity is for display and for the app's own attribution, not for
+    authorisation.
     """
     for key in ("id_token", "access_token"):
         token = tokens.get(key)
