@@ -2,8 +2,9 @@ import type { VitePWAOptions } from 'vite-plugin-pwa';
 
 /**
  * Both the dev server and `vite preview` (the production build served on :5173)
- * forward API and auth traffic to the BFF. Vite does not copy `server.proxy` to
- * `preview`, so a single constant is shared to keep them from drifting.
+ * forward API and auth traffic to the BFF. `preview.proxy` defaults to
+ * `server.proxy`; both are set explicitly from this one constant for clarity and
+ * so they cannot drift.
  */
 export const apiProxy = {
   '/api': { target: 'http://127.0.0.1:8002', changeOrigin: true },

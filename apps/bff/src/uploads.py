@@ -97,7 +97,9 @@ async def _verify_token(token: str) -> str:
         me = resp.json()
     except ValueError:
         me = {}
-    return str((me or {}).get("id") or (me or {}).get("username") or "")
+    if not isinstance(me, dict):  # a list/string/null body is not an identity
+        me = {}
+    return str(me.get("id") or me.get("username") or "")
 
 
 def _storage():

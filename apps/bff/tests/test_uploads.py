@@ -256,3 +256,71 @@ def test_delete_of_an_object_without_an_owner_is_refused(storage):
     resp = client.delete(f"/api/uploads/{key}", headers={"Authorization": "Bearer user-a"})
     assert resp.status_code == 403
     assert (settings.minio_bucket, key) in storage.objects
+
+
+class _FakeResp:
+    def __init__(self, status_code=200, payload=None, raw_json_error=False):
+        self.status_code = status_code
+        self._payload = payload
+        self._err = raw_json_error
+        self.text = ""
+
+    def json(self):
+        if self._err:
+            raise ValueError("not json")
+        return self._payload
+
+
+def _fake_city_help(monkeypatch, resp):
+    """Stub the HTTP call only, so the real _verify_token parsing runs."""
+    class FakeClient:
+        def __init__(self, *a, **k): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, headers=None): return resp
+
+    monkeypatch.setattr(uploads.httpx, "AsyncClient", FakeClient)
+
+
+@pytest.mark.parametrize(
+    "payload, expected",
+    [
+        ({"id": "sub-1", "username": "ali"}, "sub-1"),
+        ({"id": None, "username": "ali"}, "ali"),
+        ({"username": "ali"}, "ali"),
+        ({"id": None, "username": None}, ""),
+        (["not", "a", "dict"], ""),
+        ("a string", ""),
+        (None, ""),
+    ],
+)
+def test_verify_token_derives_the_owner_from_auth_me(monkeypatch, payload, expected):
+    import asyncio
+
+    _fake_city_help(monkeypatch, _FakeResp(200, payload))
+    assert asyncio.run(uploads._verify_token("t")) == expected
+
+
+def test_verify_token_survives_a_non_json_body(monkeypatch):
+    import asyncio
+
+    _fake_city_help(monkeypatch, _FakeResp(200, raw_json_error=True))
+    assert asyncio.run(uploads._verify_token("t")) == ""
+
+
+def test_upload_does_not_500_when_auth_me_is_not_a_dict(monkeypatch):
+    fake = FakeMinio()
+    monkeypatch.setattr(settings, "minio_endpoint", "minio:9000")
+    monkeypatch.setattr(settings, "minio_access_key", "a")
+    monkeypatch.setattr(settings, "minio_secret_key", "b")
+    monkeypatch.setattr(settings, "minio_bucket", "city-help")
+    monkeypatch.setattr(uploads, "_storage", lambda: fake)
+    _fake_city_help(monkeypatch, _FakeResp(200, ["oops"]))
+    resp = client.post(
+        "/api/uploads",
+        files={"file": ("e.png", _png_bytes(), "image/png")},
+        headers={"Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200, resp.text
+    key = resp.json()["key"]
+    assert fake.meta[("city-help", key)] == {}, "no owner is recorded when identity is unknown"
