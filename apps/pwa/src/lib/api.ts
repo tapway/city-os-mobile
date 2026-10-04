@@ -4,24 +4,37 @@
  * into upstream requests to City Help.
  */
 import { getAccessToken, refreshAccessToken } from './auth';
+import { getLang, translate, type Lang, type MessageKey, type Msg } from '../i18n';
 
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
     public data?: unknown,
+    /** Set when the text is one of our own fallbacks, so it re-translates on a language toggle. */
+    public msg?: Msg,
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-/** Pull the human-readable reason out of a FastAPI error body. */
-export function errorDetail(payload: unknown): string | null {
+/** An ApiError whose text is a translated app message rather than server text. */
+function keyedError(status: number, key: MessageKey, data?: unknown): ApiError {
+  return new ApiError(status, translate(getLang(), key), data, { key });
+}
+
+/**
+ * Pull the human-readable reason out of a FastAPI / City Help error body.
+ *
+ * City Help's ErrorBody is `{detail: {code, message_en, message_bm}}`; the
+ * message in the active language wins, then the other one, then the code.
+ */
+export function errorDetail(payload: unknown, lang: Lang = getLang()): string | null {
   if (!payload) return null;
   if (typeof payload === 'string') {
     try {
-      return errorDetail(JSON.parse(payload));
+      return errorDetail(JSON.parse(payload), lang);
     } catch {
       return payload.slice(0, 300) || null;
     }
@@ -29,6 +42,12 @@ export function errorDetail(payload: unknown): string | null {
   if (typeof payload === 'object') {
     const detail = (payload as { detail?: unknown }).detail;
     if (typeof detail === 'string') return detail;
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+      const d = detail as { code?: unknown; message_en?: unknown; message_bm?: unknown };
+      const [first, second] = lang === 'ms' ? [d.message_bm, d.message_en] : [d.message_en, d.message_bm];
+      for (const m of [first, second, d.code]) if (typeof m === 'string' && m) return m;
+      return null;
+    }
     // FastAPI validation errors: [{loc, msg, type}, ...]
     if (Array.isArray(detail)) {
       return detail
@@ -81,6 +100,17 @@ export function isOfflineError(err: unknown): boolean {
 }
 
 /**
+ * True when a failed live update should be kept in the queue instead of shown as an error.
+ *
+ * Offline, and 401: a session that lapsed mid-shift says nothing about the
+ * update, so the officer's work (and its evidence) is kept and sent after they
+ * sign in again (Ruling M-4, applied to the live path).
+ */
+export function shouldQueue(err: unknown): boolean {
+  return isOfflineError(err) || (err instanceof ApiError && err.status === 401);
+}
+
+/**
  * `fetch` that turns a transport failure into an ApiError.
  *
  * A request that never left the device has no status code, and a bare
@@ -92,7 +122,7 @@ async function doFetch(input: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(input, init);
   } catch {
-    throw new ApiError(0, 'You appear to be offline — check your connection');
+    throw keyedError(0, 'err.offline');
   }
 }
 
@@ -116,7 +146,7 @@ export async function apiFetch(
         return retried;
       }
     }
-    throw new ApiError(401, 'Session expired — please sign in again');
+    throw keyedError(401, 'err.sessionExpired');
   }
 
   if (!resp.ok) {
@@ -128,16 +158,16 @@ export async function apiFetch(
 
 async function toApiError(resp: Response): Promise<ApiError> {
   const text = await resp.text().catch(() => '');
+  return toApiErrorFromText(resp.status, text);
+}
+
+/** Build the ApiError for a non-2xx response body, in the active language. */
+export function toApiErrorFromText(status: number, text: string): ApiError {
   const detail = errorDetail(text);
-  const fallback =
-    resp.status === 403
-      ? 'You do not have permission to do that'
-      : resp.status === 404
-        ? 'Not found'
-        : resp.status >= 500
-          ? 'The server had a problem — please try again'
-          : `API error ${resp.status}`;
-  return new ApiError(resp.status, detail || fallback, text);
+  if (detail) return new ApiError(status, detail, text);
+  const key: MessageKey =
+    status === 403 ? 'err.forbidden' : status === 404 ? 'err.notFound' : status >= 500 ? 'err.server' : 'err.api';
+  return new ApiError(status, translate(getLang(), key, { status }), text, { key, vars: { status } });
 }
 
 export async function apiJson<T = unknown>(input: string, init?: ApiFetchOptions): Promise<T> {

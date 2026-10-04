@@ -26,3 +26,13 @@ describe('LoginBody', () => {
     expect(html).not.toContain('login-username');
   });
 });
+
+describe('I1: bootstrap-success path marks the session signed in', () => {
+  it('calls markSignedIn(true) before navigating', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../src/routes/login.tsx'), 'utf8');
+    const ok = src.slice(src.indexOf('if (ok) {'), src.indexOf('// Only now is it worth'));
+    expect(ok).toMatch(/markSignedIn\(true\)[\s\S]*navigate/);
+  });
+});

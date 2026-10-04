@@ -112,6 +112,9 @@ export class MsgError extends Error {
 export function msgOf(input: MessageKey | Msg | unknown, vars?: Vars): Msg {
   if (typeof input === 'string' && hasKey(input)) return vars ? { key: input, vars } : { key: input };
   if (input instanceof MsgError) return input.msg;
+  // Errors carrying their own translatable message (ApiError fallbacks).
+  const carried = input instanceof Error ? (input as { msg?: Msg }).msg : undefined;
+  if (carried && hasKey(String(carried.key))) return carried;
   if (input && typeof input === 'object' && 'key' in input && hasKey(String((input as Msg).key))) return input as Msg;
   const message = input instanceof Error ? input.message : String(input ?? '');
   return { key: 'msg.raw', vars: { message } };

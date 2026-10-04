@@ -19,6 +19,9 @@ export function LoginPage() {
     bootstrapSession().then((ok) => {
       if (!active) return;
       if (ok) {
+        // The guard cached "signed out" before this check refreshed the session
+        // from the cookie; without this the next guarded route bounces back here.
+        markSignedIn(true);
         navigate({ to: (search.returnTo as never) || '/tickets' });
         return;
       }

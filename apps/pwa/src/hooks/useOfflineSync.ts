@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../lib/api';
-import { deleteImage } from '../lib/help-api';
+import { deleteImage, uploadImage } from '../lib/help-api';
+import { RETRY_INTERVAL_MS, shouldAutoRetry } from '../lib/retry-policy';
 import {
   getQueue,
   syncQueue,
@@ -9,7 +10,7 @@ import {
   QUEUE_CHANGED_EVENT,
   type SyncResult,
 } from '../lib/offline-queue';
-import { onSignedIn } from '../lib/auth';
+import { onSignedIn, getSessionUser } from '../lib/auth';
 import { useOnlineStatus } from './useOnlineStatus';
 
 /**
@@ -39,6 +40,10 @@ export function useOfflineSync() {
     try {
       const result = await syncQueue((url, init) => apiFetch(url, init), {
         deleteEvidence: deleteImage,
+        // Only this officer's entries go out; a colleague's wait for their sign-in.
+        username: getSessionUser()?.username ?? null,
+        uploadPhoto: (photo, uid) =>
+          uploadImage(new File([photo.blob], photo.name, { type: photo.blob.type }), uid),
       });
       if (!shouldRecord(result)) return; // overlapping sync: keep the visible notice
       setLastResult(result);
@@ -75,6 +80,26 @@ export function useOfflineSync() {
   useEffect(() => {
     if (online) flush();
   }, [online, flush]);
+
+  // A queue that fails once (weak signal, server blip) must not sit until the
+  // next reconnect event: retry on a timer while anything is waiting, and when
+  // the officer comes back to the app.
+  const authRequired = !!lastResult?.authRequired;
+  const retry = shouldAutoRetry({ pending, online, authRequired });
+  useEffect(() => {
+    if (!retry) return;
+    const timer = setInterval(() => void flush(), RETRY_INTERVAL_MS);
+    const onFocus = () => {
+      if (document.visibilityState === 'visible') void flush();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [retry, flush]);
 
   return { pending, syncing, lastResult, flush, refreshCount };
 }

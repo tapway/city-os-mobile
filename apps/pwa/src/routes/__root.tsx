@@ -1,9 +1,10 @@
 import { Outlet, Link, useLocation } from '@tanstack/react-router';
 import { List, Clock, Plus, LogOut } from 'lucide-react';
-import { logout } from '../lib/auth';
+import { logout, getSessionUser } from '../lib/auth';
+import { canCreateTickets } from '../lib/permissions';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useOfflineSync } from '../hooks/useOfflineSync';
-import { authNotice, syncNotice } from '../lib/offline-queue';
+import { authNotice, syncNotice, otherUserNotice, logoutWarning } from '../lib/offline-queue';
 import { useLang } from '../i18n/react';
 import { LanguageToggle } from '../i18n/LanguageToggle';
 
@@ -26,9 +27,18 @@ export function RootLayout() {
   const { t, tm } = useLang();
   const location = useLocation();
   const online = useOnlineStatus();
-  const { pending, syncing, lastResult } = useOfflineSync();
+  const { pending, syncing, lastResult, flush } = useOfflineSync();
   const droppedNotice = syncNotice(lastResult);
   const signInNotice = authNotice(lastResult);
+  const heldNotice = otherUserNotice(lastResult);
+  const showCreate = canCreateTickets(getSessionUser()?.roles);
+
+  const signOut = () => {
+    // Pending updates stay on the device, held until their author signs in again.
+    const warning = logoutWarning(pending);
+    if (warning && !window.confirm(tm(warning))) return;
+    void logout();
+  };
   const isLogin = location.pathname === '/login';
   const isActive = (path: string) =>
     path === '/tickets'
@@ -58,7 +68,7 @@ export function RootLayout() {
           <LanguageToggle />
           <button
             type="button"
-            onClick={() => void logout()}
+            onClick={signOut}
             style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
               background: 'transparent', border: '1px solid var(--border)',
@@ -87,6 +97,14 @@ export function RootLayout() {
             </Link>
           </div>
         )}
+        {!isLogin && heldNotice && (
+          <div
+            role="status"
+            style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--ink-dim)' }}
+          >
+            {tm(heldNotice)}
+          </div>
+        )}
         {!isLogin && droppedNotice && (
           <div
             role="alert"
@@ -104,6 +122,7 @@ export function RootLayout() {
             aria-live="polite"
             style={{
               padding: '8px 16px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
               background: online ? 'rgba(61,232,255,0.08)' : 'rgba(239,68,68,0.12)',
               borderBottom: '1px solid var(--border)',
               fontFamily: 'var(--font-label)',
@@ -113,11 +132,28 @@ export function RootLayout() {
               color: online ? 'var(--cyan)' : 'var(--danger)',
             }}
           >
-            {online
-              ? syncing
-                ? t('offline.syncing', { pending })
-                : t('offline.waiting', { pending })
-              : t('offline.banner')}
+            <span>
+              {online
+                ? syncing
+                  ? t('offline.syncing', { pending })
+                  : t('offline.waiting', { pending })
+                : t('offline.banner')}
+            </span>
+            {online && pending > 0 && (
+              <button
+                type="button"
+                data-testid="queue-send-now"
+                onClick={() => void flush()}
+                disabled={syncing}
+                style={{
+                  padding: '4px 10px', background: 'transparent', border: '1px solid var(--cyan)',
+                  borderRadius: 2, color: 'var(--cyan)', cursor: 'pointer', fontFamily: 'var(--font-label)',
+                  fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+                }}
+              >
+                {t('offline.sendNow')}
+              </button>
+            )}
           </div>
         )}
         <Outlet />
@@ -136,23 +172,25 @@ export function RootLayout() {
             <List size={22} aria-hidden="true" />
             <span style={NAV_LABEL_STYLE}>{t('nav.tickets')}</span>
           </Link>
-          <Link
-            to="/create-ticket"
-            aria-label={t('nav.report')}
-            aria-current={isActive('/create-ticket') ? 'page' : undefined}
-            className="flex flex-col items-center -mt-3"
-            style={{ textDecoration: 'none' }}
-          >
-            <div
-              style={{
-                width: 48, height: 48, borderRadius: '50%',
-                background: 'var(--cyan)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 0 20px var(--cyan-glow)',
-              }}
+          {showCreate && (
+            <Link
+              to="/create-ticket"
+              aria-label={t('nav.report')}
+              aria-current={isActive('/create-ticket') ? 'page' : undefined}
+              className="flex flex-col items-center -mt-3"
+              style={{ textDecoration: 'none' }}
             >
-              <Plus size={24} style={{ color: 'var(--bg-deep)' }} aria-hidden="true" />
-            </div>
-          </Link>
+              <div
+                style={{
+                  width: 48, height: 48, borderRadius: '50%',
+                  background: 'var(--cyan)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 0 20px var(--cyan-glow)',
+                }}
+              >
+                <Plus size={24} style={{ color: 'var(--bg-deep)' }} aria-hidden="true" />
+              </div>
+            </Link>
+          )}
           <Link
             to="/attendance"
             style={{ ...NAV_ITEM_STYLE, color: isActive('/attendance') ? 'var(--cyan)' : 'var(--ink-dim)' }}

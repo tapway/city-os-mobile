@@ -7,7 +7,7 @@ import {
   getTicket,
   getTimeline,
   statusUpdateRequest,
-  updateTicketStatus,
+  sendStatusRequest,
   runTicketAction,
   deleteImage,
   uploadImage,
@@ -15,8 +15,8 @@ import {
   type TicketDetail,
 } from '../lib/help-api';
 import { getActor } from '../lib/auth';
-import { ApiError, isOfflineError } from '../lib/api';
-import { enqueueMutation } from '../lib/offline-queue';
+import { enqueueMutation, hasQueuedForTicket } from '../lib/offline-queue';
+import { submitStatusUpdate } from '../lib/submit-update';
 import { actionButtons, buildActionUpdate, staleConflictMessage, type FieldAction } from '../lib/ticket-actions';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
@@ -76,6 +76,8 @@ export function TicketDetailPage() {
       if (action === 'need_support') {
         // No status mapping and not queueable: it is a workflow event, online only.
         if (!online) throw new MsgError('detail.err.needOnline');
+        // It acts on the state the queued updates are about to change.
+        if (await hasQueuedForTicket(ticketUid)) throw new MsgError('detail.err.pendingFirst');
         await runTicketAction(ticketUid, action, comment.trim() || undefined);
         return 'support' as const;
       }
@@ -85,9 +87,6 @@ export function TicketDetailPage() {
 
       const noteKey = actionButtons([{ action }])[0]?.noteKey ?? null;
 
-      // Upload evidence first so a failed upload never leaves a half-written update.
-      const uploaded = await Promise.all(images.map((i) => uploadImage(i.file, ticketUid)));
-
       // buildActionUpdate stamps a fresh client_request_id: a queued replay
       // carries the same key and the server applies it once.
       const request = buildActionUpdate(action, {
@@ -95,30 +94,26 @@ export function TicketDetailPage() {
         note: comment.trim() || (noteKey ? t(noteKey) : undefined),
         lat: geo.lat,
         lng: geo.lng,
-        image_urls: uploaded.map((u) => u.url),
       });
 
-      try {
-        return await updateTicketStatus(ticketUid, request);
-      } catch (err) {
-        if (!isOfflineError(err)) {
-          // Evidence was uploaded before the update, so a rejected update leaves
-          // the objects orphaned. Only a 4xx is permanent — a 5xx may be retried,
-          // and the retry re-uploads anyway.
-          if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
-            await Promise.all(
-              uploaded.map((u) => deleteImage(u.url).catch(() => undefined)),
-            );
-          }
-          throw err;
-        }
-        // Keep the officer's work. Evidence is already uploaded, so the queued
-        // entry references stored URLs — never a File, which cannot be
-        // re-serialised after the fact.
-        const { path, body } = statusUpdateRequest(ticketUid, request);
-        await enqueueMutation({ url: path, method: 'PATCH', body });
-        return 'queued' as const;
-      }
+      // Uploads evidence, then sends; offline or a lapsed session queues the
+      // update (photos as blobs) and a ticket with updates already waiting
+      // queues behind them. See lib/submit-update.ts.
+      const { outcome } = await submitStatusUpdate(
+        {
+          hasQueued: hasQueuedForTicket,
+          upload: (file, uid) => uploadImage(file, uid),
+          patch: sendStatusRequest,
+          remove: deleteImage,
+          enqueue: enqueueMutation,
+        },
+        {
+          uid: ticketUid,
+          request: statusUpdateRequest(ticketUid, request),
+          photos: images.map((i) => i.file),
+        },
+      );
+      return outcome;
     },
     onSuccess: (saved) => {
       setComment('');
@@ -129,7 +124,9 @@ export function TicketDetailPage() {
         msgOf(
           saved === 'queued'
             ? 'detail.notice.queued'
-            : saved === 'support'
+            : saved === 'queuedAuth'
+              ? 'detail.notice.queuedAuth'
+              : saved === 'support'
               ? 'detail.notice.supportRequested'
               : 'detail.notice.saved',
         ),

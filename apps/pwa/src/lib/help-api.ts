@@ -72,6 +72,8 @@ export interface ListTicketsParams {
   lane?: string;
   /** `me` = tickets assigned to the caller (server resolves the identity). */
   assignee?: 'me';
+  /** workflow_state, e.g. `dispatch` (waiting to be accepted). */
+  state?: string;
   limit?: number;
   offset?: number;
 }
@@ -85,6 +87,7 @@ export function listTicketsQuery(params: ListTicketsParams = {}): string {
   if (params.incident_type) search.set('incident_type', params.incident_type);
   if (params.lane) search.set('lane', params.lane);
   if (params.assignee) search.set('assignee', params.assignee);
+  if (params.state) search.set('state', params.state);
   search.set('limit', String(params.limit ?? 25));
   search.set('offset', String(params.offset ?? 0));
   return search.toString();
@@ -181,9 +184,13 @@ export function statusUpdateRequest(
   };
 }
 
+/** Send an already-built status request (see statusUpdateRequest). */
+export async function sendStatusRequest(request: { path: string; body: Record<string, unknown> }): Promise<TicketDetail> {
+  return apiJson<TicketDetail>(request.path, { method: 'PATCH', body: JSON.stringify(request.body) });
+}
+
 export async function updateTicketStatus(uid: string, update: StatusUpdate): Promise<TicketDetail> {
-  const { path, body } = statusUpdateRequest(uid, update);
-  return apiJson<TicketDetail>(path, { method: 'PATCH', body: JSON.stringify(body) });
+  return sendStatusRequest(statusUpdateRequest(uid, update));
 }
 
 export function actionPath(uid: string, action: string): string {
@@ -223,39 +230,6 @@ export async function createTicket(body: CreateTicketBody): Promise<TicketDetail
 }
 
 // ------------------------------------------------------ workflows & metadata
-
-export interface WorkflowButton {
-  id: number;
-  status_name: string;
-  button_name: string;
-  trigger_name: string;
-  description: string | null;
-  sort_order: number | null;
-}
-
-export async function getWorkflowButtons(domain: string): Promise<WorkflowButton[]> {
-  const raw = await apiJson<WorkflowButton[]>(
-    `/api/v1/workflows/${encodeURIComponent(domain)}/buttons`,
-  );
-  return Array.isArray(raw) ? raw : [];
-}
-
-export interface TransitionBody {
-  trigger: string;
-  actor: string;
-  note?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export async function transitionTicket(
-  uid: string,
-  body: TransitionBody,
-): Promise<{ ticket_uid: string; workflow_state: string; status: string }> {
-  return apiJson(`/api/v1/events/${encodeURIComponent(uid)}/transition`, {
-    method: 'PATCH',
-    body: JSON.stringify(body),
-  });
-}
 
 export interface IncidentType {
   id: number;

@@ -1,6 +1,13 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import { ApiError } from './api';
+import { getSessionUser } from './auth';
 import type { Msg } from '../i18n';
+
+/** A photo captured for a queued update, kept as a blob until it can be uploaded. */
+export interface QueuedPhoto {
+  blob: Blob;
+  name: string;
+}
 
 export interface QueuedMutation {
   id?: number;
@@ -8,6 +15,13 @@ export interface QueuedMutation {
   method: string;
   body: unknown;
   created_at: number;
+  /**
+   * Who queued it. A handset can change hands with updates still waiting; those
+   * must go out under the officer who made them, never the next one to sign in.
+   */
+  user?: string;
+  /** Evidence not yet uploaded (offline Complete); uploaded during sync, before the request. */
+  photos?: QueuedPhoto[];
 }
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
@@ -45,7 +59,8 @@ function announceQueueChange(): void {
 
 export async function enqueueMutation(m: Omit<QueuedMutation, 'id' | 'created_at'>): Promise<number> {
   const db = await getDB();
-  const key = await db.add('mutation-queue', { ...m, created_at: Date.now() });
+  const user = m.user ?? getSessionUser()?.username ?? undefined;
+  const key = await db.add('mutation-queue', { ...m, ...(user ? { user } : {}), created_at: Date.now() });
   announceQueueChange();
   return key as number;
 }
@@ -69,6 +84,16 @@ export async function removeFromQueue(id: number): Promise<void> {
   announceQueueChange();
 }
 
+async function updateEntry(entry: QueuedMutation): Promise<void> {
+  const db = await getDB();
+  await db.put('mutation-queue', entry);
+}
+
+/** True when an update for this ticket is already waiting (a new one must queue behind it). */
+export async function hasQueuedForTicket(uid: string): Promise<boolean> {
+  return (await getQueue()).some((q) => ticketKey(q.url) === uid);
+}
+
 export interface SyncResult {
   synced: number;
   failed: number;
@@ -78,6 +103,18 @@ export interface SyncResult {
   authRequired?: true;
   /** Set when another sync was already running; nothing was attempted. */
   skipped?: true;
+  /** Entries queued by a different signed-in user, held until that user signs in. Absent when 0. */
+  otherUser?: number;
+}
+
+/** Shown before sign-out when updates are still waiting on this device. */
+export function logoutWarning(pending: number): Msg | null {
+  return pending > 0 ? { key: 'app.signOutPending', vars: { n: pending } } : null;
+}
+
+/** "n update(s) from another user are waiting", or null. */
+export function otherUserNotice(result: SyncResult | null): Msg | null {
+  return result?.otherUser ? { key: 'offline.otherUser', vars: { n: result.otherUser } } : null;
 }
 
 /** An overlapping sync did nothing, so its result must not replace the last real one. */
@@ -121,6 +158,10 @@ export function syncNotice(result: SyncResult | null): Msg | null {
 export interface SyncOptions {
   /** Remove an evidence object that a dropped update had already uploaded. */
   deleteEvidence?: (url: string) => Promise<void>;
+  /** Signed-in username; only entries stamped with it (or unstamped legacy ones) are sent. */
+  username?: string | null;
+  /** Upload one queued photo for a ticket; resolves to the stored URL. */
+  uploadPhoto?: (photo: QueuedPhoto, uid: string) => Promise<{ url: string }>;
 }
 
 function evidenceOf(item: QueuedMutation): string[] {
@@ -154,6 +195,7 @@ export async function syncQueue(
     let synced = 0;
     let failed = 0;
     let dropped = 0;
+    let otherUser = 0;
 
     // Tickets with an entry that must be retried: later entries for them wait,
     // in order, for the next sync (sending Start before a failed Accept would 409
@@ -161,6 +203,10 @@ export async function syncQueue(
     const held = new Set<string>();
 
     for (const [index, item] of queue.entries()) {
+      if (item.user && item.user !== opts.username) {
+        otherUser++;
+        continue;
+      }
       const key = ticketKey(item.url);
       if (held.has(key)) {
         failed++;
@@ -168,6 +214,17 @@ export async function syncQueue(
       }
       let status: number;
       try {
+        // Evidence captured offline goes up first; the request then carries its URLs.
+        if (item.photos?.length && opts.uploadPhoto) {
+          const urls = evidenceOf(item);
+          for (const photo of [...item.photos]) {
+            const { url } = await opts.uploadPhoto(photo, key);
+            urls.push(url);
+            item.photos = item.photos.filter((p) => p !== photo);
+            item.body = { ...(item.body as object), image_urls: [...urls] };
+            await updateEntry(item); // a retry must not upload this photo again
+          }
+        }
         const resp = await fetchFn(item.url, {
           method: item.method,
           body: JSON.stringify(item.body),
@@ -186,7 +243,8 @@ export async function syncQueue(
       const outcome = classifyFailure(status);
       if (outcome === 'auth') {
         // Keep this and every later entry; the caller shows a sign-in prompt.
-        return { synced, failed: failed + (queue.length - index), dropped, authRequired: true };
+        const stillQueued = queue.slice(index).filter((q) => !q.user || q.user === opts.username).length;
+        return { synced, failed: failed + stillQueued, dropped, authRequired: true, ...(otherUser > 0 ? { otherUser } : {}) };
       }
       if (item.id !== undefined && outcome === 'drop') {
         await removeFromQueue(item.id);
@@ -200,7 +258,7 @@ export async function syncQueue(
       }
     }
 
-    return { synced, failed, dropped };
+    return { synced, failed, dropped, ...(otherUser > 0 ? { otherUser } : {}) };
   } finally {
     syncing = false;
   }
