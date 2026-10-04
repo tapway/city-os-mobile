@@ -230,11 +230,12 @@ test.describe('MOBILE UAT', () => {
     await page.waitForTimeout(5_000);
     const tl = await timeline('engineer', t.uid);
     expect(tl.filter((e) => e.from_state === 'accepted' && e.to_state === 'in_progress')).toHaveLength(1);
-    // Exactly-once on the legacy timeline: one ASSIGNED -> IN_PROGRESS status change, however many replays.
+    // Exactly-once on the legacy timeline: one `start` event accepted -> in_progress, however many replays.
+    // The legacy rows carry workflow states in old_status/new_status and the action in event_type.
     const legacy = await legacyTimeline('engineer', t.uid);
     expect(
-      legacy.filter((e) => e.old_status === 'ASSIGNED' && e.new_status === 'IN_PROGRESS'),
-      'one ASSIGNED -> IN_PROGRESS status-change event',
+      legacy.filter((e) => e.event_type === 'start' && e.old_status === 'accepted' && e.new_status === 'in_progress'),
+      'one start event accepted -> in_progress',
     ).toHaveLength(1);
     expect(ids_seen.size, 'one logical update, one client_request_id').toBeLessThanOrEqual(1);
   });
