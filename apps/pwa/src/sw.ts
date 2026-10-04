@@ -1,12 +1,31 @@
-import { precacheAndRoute } from 'workbox-precaching';
-import { registerRoute } from 'workbox-routing';
+import { clientsClaim } from 'workbox-core';
+import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
+import { NavigationRoute, registerRoute } from 'workbox-routing';
 import {
   STALE_CACHE_NAMES,
   shouldBypassServiceWorkerCache,
 } from './lib/cache-policy';
 
-// Precache the app shell (vite-plugin-pwa injects the manifest)
-precacheAndRoute((self as any).__WB_MANIFEST || []);
+// A new build must replace the old one without a second visit: take over
+// straight away (registerType autoUpdate; main.tsx calls registerSW).
+(self as any).skipWaiting();
+clientsClaim();
+cleanupOutdatedCaches();
+
+// Precache the app shell (vite-plugin-pwa injects the manifest). The manifest's
+// start_url carries ?source=pwa and campaign links carry utm_*; neither should
+// miss the precache.
+precacheAndRoute((self as any).__WB_MANIFEST, {
+  ignoreURLParametersMatching: [/^utm_/, /^source$/],
+});
+
+// Offline deep links (/tickets/CH-…) get the app shell; API and auth paths
+// never do, so a failed fetch there stays a failure instead of returning HTML.
+registerRoute(
+  new NavigationRoute(createHandlerBoundToURL('/index.html'), {
+    denylist: [/^\/api\//, /^\/auth\//],
+  }),
+);
 
 // Authenticated traffic is never cached.
 //
@@ -44,10 +63,3 @@ registerRoute(
   ({ url }) => url.pathname.includes('/stream') || url.pathname.includes('/hls'),
   ({ request }) => fetch(request),
 );
-
-// Listen for skip waiting message from the app
-self.addEventListener('message', (event) => {
-  if (event.data === 'SKIP_WAITING') {
-    (self as any).skipWaiting();
-  }
-});

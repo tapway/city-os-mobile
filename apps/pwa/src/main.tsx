@@ -1,3 +1,4 @@
+/// <reference types="vite-plugin-pwa/client" />
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -11,6 +12,11 @@ import { AttendancePage } from './routes/attendance';
 import { CreateTicketPage } from './routes/create-ticket';
 import { initLang } from './i18n';
 import './styles.css';
+import { registerSW } from 'virtual:pwa-register';
+
+// Register the service worker; with registerType autoUpdate a new build
+// activates and reloads the app on its own.
+registerSW({ immediate: true });
 
 // Language from localStorage (default EN) + <html lang>, before first render.
 initLang();

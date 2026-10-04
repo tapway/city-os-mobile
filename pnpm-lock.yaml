@@ -96,6 +96,9 @@ importers:
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@26.1.2)(lightningcss@1.32.0)(msw@2.15.0(@types/node@26.1.2)(typescript@5.9.3))(terser@5.49.0)
+      workbox-core:
+        specifier: ^7.3.0
+        version: 7.4.1
       workbox-expiration:
         specifier: ^7.3.0
         version: 7.4.1
@@ -106,6 +109,9 @@ importers:
         specifier: ^7.3.0
         version: 7.4.1
       workbox-strategies:
+        specifier: ^7.3.0
+        version: 7.4.1
+      workbox-window:
         specifier: ^7.3.0
         version: 7.4.1
 

@@ -6,6 +6,7 @@
  * 12h refresh cookie. `bootstrapSession()` is what turns that cookie back into
  * a usable session — screens must await it before deciding the user is signed out.
  */
+import { cachesToClear } from './cache-policy';
 
 let accessToken: string | null = null;
 let expiresAt = 0;
@@ -219,7 +220,7 @@ export function loginRedirect(): void {
   window.location.href = `/auth/login?${params.toString()}`;
 }
 
-/** Drop everything the service worker stored for this session.
+/** Drop the responses the service worker stored for this session (not the app-shell precache).
  *
  * Cache Storage is keyed by URL rather than by user, so a handset that changes
  * hands must not keep the previous officer's responses. The shell is
@@ -229,7 +230,7 @@ async function clearCachedResponses(): Promise<void> {
   if (typeof caches === 'undefined') return;
   try {
     const names = await caches.keys();
-    await Promise.all(names.map((name) => caches.delete(name)));
+    await Promise.all(cachesToClear(names).map((name) => caches.delete(name)));
   } catch {
     // Storage unavailable (private mode, quota) — nothing to clear.
   }
