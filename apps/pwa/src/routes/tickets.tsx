@@ -29,20 +29,7 @@ export function TicketsPage() {
   // null = the user has not chosen: Mine for handling staff, All for others.
   const [chosenFilter, setChosenFilter] = useState<string | null>(null);
   const debouncedSearch = useDebouncedValue(search, 300);
-  const roles = getSessionUser()?.roles;
-  const isStaff = !!roles?.includes('handling_staff');
-
-  // The engineer's default depends on whether anything is waiting to be accepted.
-  // This is the To accept list itself, so choosing it afterwards reuses the cache.
-  const toAcceptFilter = FILTERS.find((f) => f.id === 'to_accept')!;
-  const probe = useQuery({
-    queryKey: ['tickets', '', toAcceptFilter.id],
-    queryFn: () => listTickets({ state: toAcceptFilter.state, limit: 50 }),
-    enabled: isStaff && chosenFilter === null && !!getAccessToken(),
-  });
-  const probing = isStaff && chosenFilter === null && probe.isPending && !!getAccessToken();
-
-  const activeId = chosenFilter ?? defaultTicketFilter(roles, probe.data?.total);
+  const activeId = chosenFilter ?? defaultTicketFilter(getSessionUser()?.roles);
   const activeFilter = FILTERS.find((f) => f.id === activeId) ?? FILTERS[0]!;
 
   useEffect(() => {
@@ -51,7 +38,7 @@ export function TicketsPage() {
     }
   }, [navigate]);
 
-  const { data, isLoading: listLoading, isFetching, error, refetch } = useQuery({
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ['tickets', debouncedSearch, activeFilter.id],
     queryFn: () =>
       listTickets({
@@ -61,10 +48,9 @@ export function TicketsPage() {
         state: activeFilter.state,
         limit: 50,
       }),
-    enabled: !!getAccessToken() && !probing,
+    enabled: !!getAccessToken(),
   });
 
-  const isLoading = listLoading || probing;
   const tickets = data?.items ?? [];
   const total = data?.total ?? 0;
   const searching = debouncedSearch.trim().length > 0;

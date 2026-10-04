@@ -20,14 +20,13 @@ describe('I4: To accept filter', () => {
     expect(en['tickets.filter.toAccept']).toBeTruthy();
     expect(ms['tickets.filter.toAccept']).toBeTruthy();
   });
-  it('engineer default: To accept when it has items, else Mine', () => {
-    expect(defaultTicketFilter(['handling_staff'], 3)).toBe('to_accept');
-    expect(defaultTicketFilter(['handling_staff'], 0)).toBe('mine');
-    expect(defaultTicketFilter(['handling_staff'], null)).toBe('mine');
+  it('engineer default stays Mine (state=dispatch is not scoped to the caller yet)', () => {
     expect(defaultTicketFilter(['handling_staff'])).toBe('mine');
+    // a pending To accept count must not change it
+    expect((defaultTicketFilter as (...a: unknown[]) => string)(['handling_staff'], 3)).toBe('mine');
   });
   it('others stay on All regardless of count', () => {
-    expect(defaultTicketFilter(['intake_officer'], 5)).toBe('all');
+    expect(defaultTicketFilter(['intake_officer'])).toBe('all');
   });
 });
 

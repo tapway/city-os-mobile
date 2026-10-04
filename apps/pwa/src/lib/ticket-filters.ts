@@ -26,15 +26,10 @@ export const TICKET_FILTERS: TicketFilter[] = [
 ];
 
 /**
- * Role-based default for the ticket list.
- *
- * Handling staff (the field engineer) start on To accept when something is
- * waiting for them, otherwise on Mine; everyone else on All.
+ * Role-based default for the ticket list: Mine for handling staff (they work an
+ * assigned queue), All for everyone else. To accept is a chip, not the default:
+ * the server's state=dispatch is not yet scoped to the caller's department.
  */
-export function defaultTicketFilter(
-  roles: readonly string[] | undefined,
-  toAcceptCount?: number | null,
-): 'to_accept' | 'mine' | 'all' {
-  if (!roles?.includes('handling_staff')) return 'all';
-  return toAcceptCount && toAcceptCount > 0 ? 'to_accept' : 'mine';
+export function defaultTicketFilter(roles: readonly string[] | undefined): 'mine' | 'all' {
+  return roles?.includes('handling_staff') ? 'mine' : 'all';
 }
