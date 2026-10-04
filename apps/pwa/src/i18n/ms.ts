@@ -14,6 +14,7 @@ export const ms: Record<MessageKey, string> = {
   'tickets.filter.toAccept': 'Untuk diterima',
   'app.signOutPending': '{n} kemas kini masih menunggu untuk dihantar dari peranti ini. Log keluar akan menahannya sehingga anda log masuk semula. Log keluar juga?',
   'offline.otherUser': '{n} kemas kini daripada pengguna lain menunggu pada peranti ini dan akan dihantar apabila mereka log masuk.',
+  'offline.photoDropped': '{n} gambar ditolak oleh pelayan dan tidak disertakan; kemas kini tetap dihantar.',
   'offline.sendNow': 'Hantar sekarang',
   'detail.notice.queuedAuth': 'Sesi tamat — kemas kini disimpan pada peranti ini. Log masuk semula untuk menghantarnya.',
   'detail.err.pendingFirst': 'Tiket ini mempunyai kemas kini yang menunggu untuk dihantar. Tunggu sehingga disegerakkan, kemudian cuba lagi.',

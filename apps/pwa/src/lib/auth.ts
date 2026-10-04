@@ -45,11 +45,14 @@ function rememberUser(token: string): void {
   const claims = decodeJwtPayload(token);
   if (!claims) return;
   const realmAccess = (claims.realm_access as { roles?: string[] } | undefined) || undefined;
+  // This realm's access token may omit preferred_username/sub; the identity
+  // hydrated from the BFF must survive a token refresh, not be reset to null.
+  const prev = currentUser;
   currentUser = {
-    sub: (claims.sub as string) ?? null,
-    name: (claims.name as string) ?? null,
-    username: (claims.preferred_username as string) ?? null,
-    roles: realmAccess?.roles ?? [],
+    sub: (claims.sub as string) ?? prev?.sub ?? null,
+    name: (claims.name as string) ?? prev?.name ?? null,
+    username: (claims.preferred_username as string) ?? prev?.username ?? null,
+    roles: realmAccess?.roles ?? prev?.roles ?? [],
   };
 }
 

@@ -14,7 +14,7 @@ import {
   storageUrl,
   type TicketDetail,
 } from '../lib/help-api';
-import { getActor } from '../lib/auth';
+import { getActor, getSessionUser } from '../lib/auth';
 import { enqueueMutation, hasQueuedForTicket } from '../lib/offline-queue';
 import { submitStatusUpdate } from '../lib/submit-update';
 import { actionButtons, buildActionUpdate, staleConflictMessage, type FieldAction } from '../lib/ticket-actions';
@@ -73,11 +73,13 @@ export function TicketDetailPage() {
   const updateMutation = useMutation({
     mutationFn: async (action: FieldAction) => {
       if (!ticketUid) throw new MsgError('detail.err.missingTicket');
+      // Read now: a 401 whose refresh fails clears the session mid-request.
+      const user = getSessionUser()?.username ?? '';
       if (action === 'need_support') {
         // No status mapping and not queueable: it is a workflow event, online only.
         if (!online) throw new MsgError('detail.err.needOnline');
         // It acts on the state the queued updates are about to change.
-        if (await hasQueuedForTicket(ticketUid)) throw new MsgError('detail.err.pendingFirst');
+        if (await hasQueuedForTicket(ticketUid, user)) throw new MsgError('detail.err.pendingFirst');
         await runTicketAction(ticketUid, action, comment.trim() || undefined);
         return 'support' as const;
       }
@@ -111,6 +113,7 @@ export function TicketDetailPage() {
           uid: ticketUid,
           request: statusUpdateRequest(ticketUid, request),
           photos: images.map((i) => i.file),
+          user,
         },
       );
       return outcome;

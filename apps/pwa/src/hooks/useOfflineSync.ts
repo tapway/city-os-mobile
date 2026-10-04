@@ -7,6 +7,8 @@ import {
   getQueue,
   syncQueue,
   shouldRecord,
+  ownEntries,
+  trackSync,
   QUEUE_CHANGED_EVENT,
   type SyncResult,
 } from '../lib/offline-queue';
@@ -28,7 +30,8 @@ export function useOfflineSync() {
 
   const refreshCount = useCallback(async () => {
     try {
-      setPending((await getQueue()).length);
+      // Only this officer's updates: a colleague's are held and not theirs to send or warn about.
+      setPending(ownEntries(await getQueue(), getSessionUser()?.username).length);
     } catch {
       setPending(0);
     }
@@ -36,27 +39,22 @@ export function useOfflineSync() {
 
   const flush = useCallback(async () => {
     if (!navigator.onLine) return;
-    setSyncing(true);
-    try {
-      const result = await syncQueue((url, init) => apiFetch(url, init), {
-        deleteEvidence: deleteImage,
-        // Only this officer's entries go out; a colleague's wait for their sign-in.
-        username: getSessionUser()?.username ?? null,
-        uploadPhoto: (photo, uid) =>
-          uploadImage(new File([photo.blob], photo.name, { type: photo.blob.type }), uid),
-      });
-      if (!shouldRecord(result)) return; // overlapping sync: keep the visible notice
-      setLastResult(result);
-      // Replayed (or rejected) updates changed what the server holds.
-      if (result.synced + result.dropped > 0) {
-        void queryClient.invalidateQueries({ queryKey: ['ticket'] });
-        void queryClient.invalidateQueries({ queryKey: ['timeline'] });
-        void queryClient.invalidateQueries({ queryKey: ['tickets'] });
-      }
-      await refreshCount();
-    } finally {
-      setSyncing(false);
+    const result = await trackSync(setSyncing, () => syncQueue((url, init) => apiFetch(url, init), {
+      deleteEvidence: deleteImage,
+      // Only this officer's entries go out; a colleague's wait for their sign-in.
+      username: getSessionUser()?.username ?? null,
+      uploadPhoto: (photo, uid) =>
+        uploadImage(new File([photo.blob], photo.name, { type: photo.blob.type }), uid),
+    }));
+    if (!shouldRecord(result)) return; // overlapping sync: keep the visible notice
+    setLastResult(result);
+    // Replayed (or rejected) updates changed what the server holds.
+    if (result.synced + result.dropped > 0) {
+      void queryClient.invalidateQueries({ queryKey: ['ticket'] });
+      void queryClient.invalidateQueries({ queryKey: ['timeline'] });
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     }
+    await refreshCount();
   }, [refreshCount, queryClient]);
 
   useEffect(() => {
@@ -74,7 +72,14 @@ export function useOfflineSync() {
   }, [refreshCount]);
 
   // A 401 paused the queue; replay once the officer has signed in again.
-  useEffect(() => onSignedIn(() => void flush()), [flush]);
+  useEffect(
+    () =>
+      onSignedIn(() => {
+        void refreshCount();
+        void flush();
+      }),
+    [flush, refreshCount],
+  );
 
   // Replay as soon as the device is back online.
   useEffect(() => {

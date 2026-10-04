@@ -89,9 +89,34 @@ async function updateEntry(entry: QueuedMutation): Promise<void> {
   await db.put('mutation-queue', entry);
 }
 
-/** True when an update for this ticket is already waiting (a new one must queue behind it). */
-export async function hasQueuedForTicket(uid: string): Promise<boolean> {
-  return (await getQueue()).some((q) => ticketKey(q.url) === uid);
+/** Entries this user may send: their own, plus unstamped ones from before owners were recorded. */
+export function ownEntries<T extends { user?: string }>(queue: T[], username: string | null | undefined): T[] {
+  return queue.filter((q) => !q.user || q.user === username);
+}
+
+/** True when an update of this user's for the ticket is already waiting (a new one must queue behind it). */
+export async function hasQueuedForTicket(uid: string, username?: string | null): Promise<boolean> {
+  return ownEntries(await getQueue(), username).some((q) => ticketKey(q.url) === uid);
+}
+
+/**
+ * Run a sync while mirroring "a sync is in flight" into `setSyncing`.
+ * An overlapping call that did nothing (`skipped`) must not clear the flag
+ * while the first sync is still running.
+ */
+export async function trackSync<R extends { skipped?: true }>(
+  setSyncing: (syncing: boolean) => void,
+  run: () => Promise<R>,
+): Promise<R> {
+  setSyncing(true);
+  let skipped = false;
+  try {
+    const result = await run();
+    skipped = !!result.skipped;
+    return result;
+  } finally {
+    if (!skipped) setSyncing(false);
+  }
 }
 
 export interface SyncResult {
@@ -105,6 +130,13 @@ export interface SyncResult {
   skipped?: true;
   /** Entries queued by a different signed-in user, held until that user signs in. Absent when 0. */
   otherUser?: number;
+  /** Photos the server refused (too large, wrong type, forbidden); the update went out without them. Absent when 0. */
+  photosDropped?: number;
+}
+
+/** "n photo(s) were rejected and left out", or null. */
+export function photoDroppedNotice(result: SyncResult | null): Msg | null {
+  return result?.photosDropped ? { key: 'offline.photoDropped', vars: { n: result.photosDropped } } : null;
 }
 
 /** Shown before sign-out when updates are still waiting on this device. */
@@ -196,6 +228,7 @@ export async function syncQueue(
     let failed = 0;
     let dropped = 0;
     let otherUser = 0;
+    let photosDropped = 0;
 
     // Tickets with an entry that must be retried: later entries for them wait,
     // in order, for the next sync (sending Start before a failed Accept would 409
@@ -204,7 +237,8 @@ export async function syncQueue(
 
     for (const [index, item] of queue.entries()) {
       if (item.user && item.user !== opts.username) {
-        otherUser++;
+        // With no signed-in user yet (session not restored) "another user" is unknowable.
+        if (opts.username) otherUser++;
         continue;
       }
       const key = ticketKey(item.url);
@@ -218,8 +252,16 @@ export async function syncQueue(
         if (item.photos?.length && opts.uploadPhoto) {
           const urls = evidenceOf(item);
           for (const photo of [...item.photos]) {
-            const { url } = await opts.uploadPhoto(photo, key);
-            urls.push(url);
+            try {
+              const { url } = await opts.uploadPhoto(photo, key);
+              urls.push(url);
+            } catch (err) {
+              const code = err instanceof ApiError ? err.status : 0;
+              // The server permanently refused this photo (413/415/403...): leave
+              // it out, but never lose the update it belongs to.
+              if (classifyFailure(code) !== 'drop') throw err;
+              photosDropped++;
+            }
             item.photos = item.photos.filter((p) => p !== photo);
             item.body = { ...(item.body as object), image_urls: [...urls] };
             await updateEntry(item); // a retry must not upload this photo again
@@ -244,7 +286,7 @@ export async function syncQueue(
       if (outcome === 'auth') {
         // Keep this and every later entry; the caller shows a sign-in prompt.
         const stillQueued = queue.slice(index).filter((q) => !q.user || q.user === opts.username).length;
-        return { synced, failed: failed + stillQueued, dropped, authRequired: true, ...(otherUser > 0 ? { otherUser } : {}) };
+        return { synced, failed: failed + stillQueued, dropped, authRequired: true, ...(otherUser > 0 ? { otherUser } : {}), ...(photosDropped > 0 ? { photosDropped } : {}) };
       }
       if (item.id !== undefined && outcome === 'drop') {
         await removeFromQueue(item.id);
@@ -258,7 +300,7 @@ export async function syncQueue(
       }
     }
 
-    return { synced, failed, dropped, ...(otherUser > 0 ? { otherUser } : {}) };
+    return { synced, failed, dropped, ...(otherUser > 0 ? { otherUser } : {}), ...(photosDropped > 0 ? { photosDropped } : {}) };
   } finally {
     syncing = false;
   }

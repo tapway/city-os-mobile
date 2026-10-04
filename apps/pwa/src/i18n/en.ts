@@ -14,6 +14,7 @@ export const en = {
   'tickets.filter.toAccept': 'To accept',
   'app.signOutPending': '{n} update(s) are still waiting to send from this device. Signing out holds them until you sign in again. Sign out anyway?',
   'offline.otherUser': '{n} update(s) from another user are waiting on this device and will send when they sign in.',
+  'offline.photoDropped': '{n} photo(s) were rejected by the server and left out; the update was still sent.',
   'offline.sendNow': 'Send now',
   'detail.notice.queuedAuth': 'Session expired — update saved on this device. Sign in again to send it.',
   'detail.err.pendingFirst': 'This ticket has updates waiting to send. Wait for them to sync, then try again.',

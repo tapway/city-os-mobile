@@ -8,6 +8,9 @@ import {
   hasQueuedForTicket,
   logoutWarning,
   otherUserNotice,
+  photoDroppedNotice,
+  ownEntries,
+  trackSync,
 } from '../src/lib/offline-queue';
 import { ApiError } from '../src/lib/api';
 
@@ -151,5 +154,90 @@ describe('a live action behind queued entries', () => {
     await enqueueMutation({ url: '/api/tickets/T-1/status', method: 'PATCH', body: {} });
     expect(await hasQueuedForTicket('T-1')).toBe(true);
     expect(await hasQueuedForTicket('T-2')).toBe(false);
+  });
+});
+
+describe('401 + failed refresh: the entry keeps its original owner', () => {
+  beforeEach(async () => { await clearQueue(); });
+  it('is not sent by another user who signs in on the handset', async () => {
+    await enqueueMutation({ url: '/api/tickets/T-1/status', method: 'PATCH', body: {}, user: 'ali' });
+    const fetchFn = vi.fn(ok);
+    await syncQueue(fetchFn, { username: 'budi' });
+    expect(fetchFn).not.toHaveBeenCalled();
+    await syncQueue(fetchFn, { username: 'ali' });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a rejected photo upload drops that photo only', () => {
+  beforeEach(async () => { await clearQueue(); });
+  const enqueue = () => enqueueMutation({
+    url: '/api/tickets/T-1/status', method: 'PATCH', user: 'ali',
+    body: { status: 'RESOLVED', client_request_id: 'k1' },
+    photos: [photo('big.jpg'), photo('ok.jpg')],
+  });
+  it.each([413, 415, 403])('%i: the update still goes out with the other photo, and a notice is counted', async (code) => {
+    await enqueue();
+    const bodies: unknown[] = [];
+    const res = await syncQueue(async (_u, init) => { bodies.push(JSON.parse(String(init.body))); return new Response('{}', { status: 200 }); }, {
+      username: 'ali',
+      uploadPhoto: async (p) => { if (p.name === 'big.jpg') throw new ApiError(code, 'no'); return { url: `/api/uploads/${p.name}` }; },
+    });
+    expect(res).toMatchObject({ synced: 1, dropped: 0, photosDropped: 1 });
+    expect((bodies[0] as { image_urls: string[] }).image_urls).toEqual(['/api/uploads/ok.jpg']);
+    expect(await getQueue()).toHaveLength(0);
+  });
+  it('401/408/429 keep the photo and the entry', async () => {
+    for (const code of [401, 408, 429]) {
+      await clearQueue();
+      await enqueue();
+      const fetchFn = vi.fn(ok);
+      const res = await syncQueue(fetchFn, { username: 'ali', uploadPhoto: async () => { throw new ApiError(code, 'x'); } });
+      expect(res.photosDropped).toBeUndefined();
+      expect(fetchFn).not.toHaveBeenCalled();
+      expect((await getQueue())[0]?.photos).toHaveLength(2);
+    }
+  });
+  it('has a notice', () => {
+    expect(photoDroppedNotice({ synced: 1, failed: 0, dropped: 0, photosDropped: 2 })).toEqual({ key: 'offline.photoDropped', vars: { n: 2 } });
+    expect(photoDroppedNotice(null)).toBeNull();
+  });
+});
+
+describe('unknown user (session not restored yet)', () => {
+  beforeEach(async () => { await clearQueue(); });
+  it('does not count or announce other-user entries', async () => {
+    await enqueueMutation({ url: '/api/tickets/T-1/status', method: 'PATCH', body: {}, user: 'ali' });
+    const res = await syncQueue(ok, { username: null });
+    expect(res.otherUser).toBeUndefined();
+  });
+});
+
+describe('own entries only', () => {
+  beforeEach(async () => { await clearQueue(); });
+  it('hasQueuedForTicket ignores another user\'s entries', async () => {
+    await enqueueMutation({ url: '/api/tickets/T-1/status', method: 'PATCH', body: {}, user: 'ali' });
+    expect(await hasQueuedForTicket('T-1', 'ali')).toBe(true);
+    expect(await hasQueuedForTicket('T-1', 'budi')).toBe(false);
+  });
+  it('ownEntries counts the user plus unstamped legacy entries', () => {
+    const q = [{ user: 'ali' }, { user: 'budi' }, {}] as never[];
+    expect(ownEntries(q, 'ali')).toHaveLength(2);
+    expect(ownEntries(q, null)).toHaveLength(1);
+  });
+});
+
+describe('trackSync: Send now stays disabled while any sync runs', () => {
+  it('a skipped overlapping flush does not clear syncing', async () => {
+    const states: boolean[] = [];
+    const r = await trackSync((b) => states.push(b), async () => ({ synced: 0, failed: 0, dropped: 0, skipped: true as const }));
+    expect(r.skipped).toBe(true);
+    expect(states).toEqual([true]); // never set back to false by the skipped run
+  });
+  it('a real run clears it, also on error', async () => {
+    const states: boolean[] = [];
+    await trackSync((b) => states.push(b), async () => ({ synced: 1, failed: 0, dropped: 0 }));
+    await expect(trackSync((b) => states.push(b), async () => { throw new Error('x'); })).rejects.toThrow();
+    expect(states).toEqual([true, false, true, false]);
   });
 });

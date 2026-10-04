@@ -4,7 +4,7 @@ import { logout, getSessionUser } from '../lib/auth';
 import { canCreateTickets } from '../lib/permissions';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useOfflineSync } from '../hooks/useOfflineSync';
-import { authNotice, syncNotice, otherUserNotice, logoutWarning } from '../lib/offline-queue';
+import { authNotice, syncNotice, otherUserNotice, photoDroppedNotice, logoutWarning } from '../lib/offline-queue';
 import { useLang } from '../i18n/react';
 import { LanguageToggle } from '../i18n/LanguageToggle';
 
@@ -31,6 +31,7 @@ export function RootLayout() {
   const droppedNotice = syncNotice(lastResult);
   const signInNotice = authNotice(lastResult);
   const heldNotice = otherUserNotice(lastResult);
+  const photoNotice = photoDroppedNotice(lastResult);
   const showCreate = canCreateTickets(getSessionUser()?.roles);
 
   const signOut = () => {
@@ -103,6 +104,17 @@ export function RootLayout() {
             style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--ink-dim)' }}
           >
             {tm(heldNotice)}
+          </div>
+        )}
+        {!isLogin && photoNotice && (
+          <div
+            role="alert"
+            style={{
+              padding: '8px 16px', background: 'rgba(239,68,68,0.12)', borderBottom: '1px solid var(--border)',
+              fontSize: 12, color: 'var(--danger)',
+            }}
+          >
+            {tm(photoNotice)}
           </div>
         )}
         {!isLogin && droppedNotice && (
