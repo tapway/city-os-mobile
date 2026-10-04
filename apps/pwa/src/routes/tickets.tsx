@@ -5,13 +5,12 @@ import { Search, RefreshCw, MapPin, X } from 'lucide-react';
 import { Badge } from '@city-os/ui';
 import { listTickets, type TicketListItem } from '../lib/help-api';
 import { getAccessToken, getSessionUser } from '../lib/auth';
-import { defaultTicketFilter } from '../lib/ticket-filters';
+import { TICKET_FILTERS as FILTERS, defaultTicketFilter } from '../lib/ticket-filters';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateTime } from '../i18n/format';
 import { useLang } from '../i18n/react';
 import { statusLabel } from '../i18n/labels';
-import type { MessageKey } from '../i18n';
 
 const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
   OPEN: 'warning',
@@ -22,16 +21,6 @@ const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger
   CLOSED: 'default',
 };
 
-const FILTERS: { id: string; labelKey: MessageKey; statuses?: string[]; assignee?: 'me' }[] = [
-  { id: 'mine', labelKey: 'tickets.filter.mine', assignee: 'me' },
-  { id: 'all', labelKey: 'tickets.filter.all' },
-  { id: 'open', labelKey: 'tickets.filter.open', statuses: ['OPEN'] },
-  { id: 'assigned', labelKey: 'tickets.filter.assigned', statuses: ['ASSIGNED', 'VERIFIED'] },
-  { id: 'in_progress', labelKey: 'tickets.filter.inProgress', statuses: ['IN_PROGRESS'] },
-  { id: 'resolved', labelKey: 'tickets.filter.resolved', statuses: ['RESOLVED'] },
-  { id: 'closed', labelKey: 'tickets.filter.closed', statuses: ['CLOSED'] },
-];
-
 export function TicketsPage() {
   const { t, lang } = useLang();
   const navigate = useNavigate();
@@ -40,7 +29,20 @@ export function TicketsPage() {
   // null = the user has not chosen: Mine for handling staff, All for others.
   const [chosenFilter, setChosenFilter] = useState<string | null>(null);
   const debouncedSearch = useDebouncedValue(search, 300);
-  const activeId = chosenFilter ?? defaultTicketFilter(getSessionUser()?.roles);
+  const roles = getSessionUser()?.roles;
+  const isStaff = !!roles?.includes('handling_staff');
+
+  // The engineer's default depends on whether anything is waiting to be accepted.
+  // This is the To accept list itself, so choosing it afterwards reuses the cache.
+  const toAcceptFilter = FILTERS.find((f) => f.id === 'to_accept')!;
+  const probe = useQuery({
+    queryKey: ['tickets', '', toAcceptFilter.id],
+    queryFn: () => listTickets({ state: toAcceptFilter.state, limit: 50 }),
+    enabled: isStaff && chosenFilter === null && !!getAccessToken(),
+  });
+  const probing = isStaff && chosenFilter === null && probe.isPending && !!getAccessToken();
+
+  const activeId = chosenFilter ?? defaultTicketFilter(roles, probe.data?.total);
   const activeFilter = FILTERS.find((f) => f.id === activeId) ?? FILTERS[0]!;
 
   useEffect(() => {
@@ -49,18 +51,20 @@ export function TicketsPage() {
     }
   }, [navigate]);
 
-  const { data, isLoading, isFetching, error, refetch } = useQuery({
+  const { data, isLoading: listLoading, isFetching, error, refetch } = useQuery({
     queryKey: ['tickets', debouncedSearch, activeFilter.id],
     queryFn: () =>
       listTickets({
         q: debouncedSearch,
         status: activeFilter.statuses,
         assignee: activeFilter.assignee,
+        state: activeFilter.state,
         limit: 50,
       }),
-    enabled: !!getAccessToken(),
+    enabled: !!getAccessToken() && !probing,
   });
 
+  const isLoading = listLoading || probing;
   const tickets = data?.items ?? [];
   const total = data?.total ?? 0;
   const searching = debouncedSearch.trim().length > 0;
@@ -209,7 +213,9 @@ export function TicketsPage() {
           <p style={{ color: 'var(--ink-dim)', fontSize: 13, textAlign: 'center' }}>
             {searching
               ? t('tickets.emptySearch', { query: debouncedSearch.trim() })
-              : activeFilter.assignee
+              : activeFilter.state
+                ? t('tickets.emptyToAccept')
+                : activeFilter.assignee
                 ? t('tickets.emptyMine')
                 : activeFilter.statuses
                 ? t('tickets.emptyFilter', { status: t(activeFilter.labelKey).toLowerCase() })
