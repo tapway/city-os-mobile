@@ -66,6 +66,7 @@ export interface Detail {
   image_urls?: string[] | null;
   attachments?: Array<{ url?: string; object_key?: string; content_type?: string; kind?: string; filename?: string }>;
   available_actions?: ActionView[];
+  is_locked?: boolean;
 }
 export interface TimelineEntry {
   id: number; action: string; from_state: string | null; to_state: string | null;
