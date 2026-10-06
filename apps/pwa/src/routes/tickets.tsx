@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Search, RefreshCw, MapPin, X } from 'lucide-react';
 import { Badge } from '@city-os/ui';
-import { listTickets, type TicketListItem } from '../lib/help-api';
+import { listTickets, MAX_QUERY_LENGTH, clampChars, type TicketListItem } from '../lib/help-api';
 import { getAccessToken, getSessionUser } from '../lib/auth';
-import { TICKET_FILTERS as FILTERS, defaultTicketFilter, filterTestId } from '../lib/ticket-filters';
+import { TICKET_FILTERS as FILTERS, resolveDefaultView, filterTestId, type DefaultView } from '../lib/ticket-filters';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateTime } from '../i18n/format';
@@ -29,7 +29,26 @@ export function TicketsPage() {
   // null = the user has not chosen: Mine for handling staff, All for others.
   const [chosenFilter, setChosenFilter] = useState<string | null>(null);
   const debouncedSearch = useDebouncedValue(search, 300);
-  const activeId = chosenFilter ?? defaultTicketFilter(getSessionUser()?.roles);
+  const roles = getSessionUser()?.roles;
+  const isEngineer = !!roles?.includes('handling_staff');
+  const toAcceptFilter = FILTERS.find((f) => f.id === 'to_accept')!;
+  // The first settled probe answer decides the default and is kept (see resolveDefaultView).
+  const latchedRef = useRef<DefaultView | null>(null);
+
+  // Probe for the engineer's default view. Same query key as the To accept chip
+  // (empty search), so choosing the chip afterwards reuses the cached answer.
+  const probe = useQuery({
+    queryKey: ['tickets', '', toAcceptFilter.id],
+    queryFn: () => listTickets({ state: toAcceptFilter.state, limit: 50 }),
+    enabled: !!getAccessToken() && isEngineer && chosenFilter === null && latchedRef.current === null,
+    retry: false,
+  });
+  // Settled = answered, failed, or paused offline (no answer is coming): then Mine.
+  const settled = probe.isSuccess || probe.isError || probe.fetchStatus === 'paused';
+  const resolved = resolveDefaultView(latchedRef.current, roles, { settled, count: probe.data?.total ?? null });
+  latchedRef.current = resolved.latched;
+  const probing = chosenFilter === null && resolved.probing;
+  const activeId = chosenFilter ?? resolved.view;
   const activeFilter = FILTERS.find((f) => f.id === activeId) ?? FILTERS[0]!;
 
   useEffect(() => {
@@ -38,7 +57,7 @@ export function TicketsPage() {
     }
   }, [navigate]);
 
-  const { data, isLoading, isFetching, error, refetch } = useQuery({
+  const { data, isLoading: listLoading, isFetching, error, refetch } = useQuery({
     queryKey: ['tickets', debouncedSearch, activeFilter.id],
     queryFn: () =>
       listTickets({
@@ -48,9 +67,10 @@ export function TicketsPage() {
         state: activeFilter.state,
         limit: 50,
       }),
-    enabled: !!getAccessToken(),
+    enabled: !!getAccessToken() && !probing,
   });
 
+  const isLoading = listLoading || probing;
   const tickets = data?.items ?? [];
   const total = data?.total ?? 0;
   const searching = debouncedSearch.trim().length > 0;
@@ -111,7 +131,8 @@ export function TicketsPage() {
             id="ticket-search"
             type="search"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setSearch(clampChars(e.target.value, MAX_QUERY_LENGTH))}
+            maxLength={MAX_QUERY_LENGTH}
             placeholder={t('tickets.searchPlaceholder')}
             autoComplete="off"
             style={{

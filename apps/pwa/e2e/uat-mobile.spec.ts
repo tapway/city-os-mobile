@@ -93,7 +93,9 @@ test.describe('MOBILE UAT', () => {
     await signIn(page);
     const chip = page.getByTestId(ids.mine);
     await expect(chip, 'M1 Mine filter').toBeVisible();
-    if ((await chip.getAttribute('aria-pressed')) !== 'true') await chip.click();
+    // Unconditional: the engineer's default probe may still be pending (Mine shown) and flip to
+    // To accept; a click sets the user's choice, which wins over the default.
+    await chip.click();
     await page.locator('#ticket-search').fill(RUN_TAG);
     const cards = page.getByTestId(ids.card);
     await expect(cards.filter({ hasText: mine.title })).toHaveCount(1, { timeout: 20_000 });

@@ -65,6 +65,25 @@ export function errorDetail(payload: unknown, lang: Lang = getLang()): string | 
   return null;
 }
 
+/** The City Help ErrorBody `detail.code` (e.g. `ticket_locked`), from a parsed body or its JSON text. */
+export function errorCode(payload: unknown): string | null {
+  if (typeof payload === 'string') {
+    try {
+      return errorCode(JSON.parse(payload));
+    } catch {
+      return null;
+    }
+  }
+  const detail = (payload as { detail?: unknown } | null)?.detail;
+  const code = detail && typeof detail === 'object' ? (detail as { code?: unknown }).code : null;
+  return typeof code === 'string' ? code : null;
+}
+
+/** A locked ticket answers every FSM action with 409 `ticket_locked` (City Help T3). */
+export function isTicketLocked(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && errorCode(err.data) === 'ticket_locked';
+}
+
 function buildHeaders(init: RequestInit, token: string | null): Headers {
   const headers = new Headers(init.headers);
   if (token) {

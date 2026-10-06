@@ -1,5 +1,6 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import { ApiError } from './api';
+import { ApiError, errorCode } from './api';
+import { chunk, keyOfUrl, MAX_EVIDENCE_PHOTOS, registerPath } from './help-api';
 import { getSessionUser } from './auth';
 import type { Msg } from '../i18n';
 
@@ -22,6 +23,14 @@ export interface QueuedMutation {
   user?: string;
   /** Evidence not yet uploaded (offline Complete); uploaded during sync, before the request. */
   photos?: QueuedPhoto[];
+  /** `evidence`: replay is upload photos -> register keys -> POST the action with the attachment ids. */
+  kind?: 'evidence';
+  /** Optional comment sent with the upload_evidence action. */
+  comment?: string;
+  /** Evidence attachments already registered upstream; a retry skips straight to the action. */
+  attachment_ids?: number[];
+  /** The last replay got 409 ticket_locked: kept (with its evidence), sent once unlocked. */
+  locked?: boolean;
 }
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
@@ -132,6 +141,13 @@ export interface SyncResult {
   otherUser?: number;
   /** Photos the server refused (too large, wrong type, forbidden); the update went out without them. Absent when 0. */
   photosDropped?: number;
+  /** Entries kept because the ticket is locked by a supervisor (409 ticket_locked). Absent when 0. */
+  locked?: number;
+}
+
+/** "n update(s) saved; ticket locked", or null. */
+export function lockedNotice(result: SyncResult | null): Msg | null {
+  return result?.locked ? { key: 'offline.locked', vars: { n: result.locked } } : null;
 }
 
 /** "n photo(s) were rejected and left out", or null. */
@@ -174,9 +190,13 @@ export function authNotice(result: SyncResult | null): Msg | null {
  *   update; an officer can work offline longer than the refresh lifetime. Keep
  *   everything and pause until they sign in again.
  * - `retry`: 408, 429, 5xx and offline are transient.
+ * - `locked`: 409 `ticket_locked`. Like retry, but the entry is flagged so the
+ *   officer is told why it waits (their update and evidence are kept).
  */
-export function classifyFailure(status: number): 'drop' | 'retry' | 'auth' {
+export function classifyFailure(status: number, code?: string | null): 'drop' | 'retry' | 'auth' | 'locked' {
   if (status === 401) return 'auth';
+  // A lock is temporary: the supervisor unlocks, the update stays valid.
+  if (status === 409 && code === 'ticket_locked') return 'locked';
   if (status === 408 || status === 429) return 'retry';
   return status >= 400 && status < 500 ? 'drop' : 'retry';
 }
@@ -199,6 +219,21 @@ export interface SyncOptions {
 function evidenceOf(item: QueuedMutation): string[] {
   const urls = (item.body as { image_urls?: unknown } | null)?.image_urls;
   return Array.isArray(urls) ? urls.filter((u): u is string => typeof u === 'string') : [];
+}
+
+/** True when the ticket is in awaiting_evidence (the state upload_evidence leads to); null if unreadable. */
+async function evidenceApplied(
+  fetchFn: (url: string, init: RequestInit) => Promise<Response>,
+  uid: string,
+): Promise<boolean | null> {
+  try {
+    const resp = await fetchFn(`/api/v1/events/${encodeURIComponent(uid)}`, { method: 'GET' });
+    if (!resp.ok) return null;
+    const detail = (await resp.json()) as { workflow_state?: string | null };
+    return detail?.workflow_state === 'awaiting_evidence';
+  } catch {
+    return null;
+  }
 }
 
 /** Flush guard so two triggers (reconnect + focus) never replay twice. */
@@ -229,6 +264,12 @@ export async function syncQueue(
     let dropped = 0;
     let otherUser = 0;
     let photosDropped = 0;
+    let locked = 0;
+    const extras = () => ({
+      ...(otherUser > 0 ? { otherUser } : {}),
+      ...(photosDropped > 0 ? { photosDropped } : {}),
+      ...(locked > 0 ? { locked } : {}),
+    });
 
     // Tickets with an entry that must be retried: later entries for them wait,
     // in order, for the next sync (sending Start before a failed Accept would 409
@@ -247,6 +288,7 @@ export async function syncQueue(
         continue;
       }
       let status: number;
+      let code: string | null = null;
       try {
         // Evidence captured offline goes up first; the request then carries its URLs.
         if (item.photos?.length && opts.uploadPhoto) {
@@ -267,9 +309,36 @@ export async function syncQueue(
             await updateEntry(item); // a retry must not upload this photo again
           }
         }
+        if (item.kind === 'evidence') {
+          // Register once; the ids are persisted so a failed action does not re-register.
+          if (!item.attachment_ids?.length) {
+            // City Help registers at most 10 items per call; chunk as a backstop for big queued entries.
+            const ids: number[] = [];
+            for (const part of chunk(evidenceOf(item), MAX_EVIDENCE_PHOTOS)) {
+              const reg = await fetchFn(registerPath(key), {
+                method: 'POST',
+                body: JSON.stringify({ kind: 'evidence', items: part.map((u) => ({ key: keyOfUrl(u) })) }),
+                headers: { 'Content-Type': 'application/json' },
+              });
+              if (!reg.ok) {
+                status = reg.status;
+                code = errorCode(await reg.clone().text().catch(() => ''));
+                throw new ApiError(status, 'register failed', null);
+              }
+              const rows = (await reg.json().catch(() => [])) as { id: number }[];
+              ids.push(...(Array.isArray(rows) ? rows : []).map((r) => r.id));
+            }
+            item.attachment_ids = ids;
+            await updateEntry(item);
+          }
+        }
         const resp = await fetchFn(item.url, {
           method: item.method,
-          body: JSON.stringify(item.body),
+          body: JSON.stringify(
+            item.kind === 'evidence'
+              ? { attachment_ids: item.attachment_ids, ...(item.comment ? { comment: item.comment } : {}) }
+              : item.body,
+          ),
           headers: { 'Content-Type': 'application/json' },
         });
         if (resp.ok) {
@@ -278,29 +347,56 @@ export async function syncQueue(
           continue;
         }
         status = resp.status;
+        code = errorCode(await resp.clone().text().catch(() => ''));
       } catch (err) {
-        status = err instanceof ApiError ? err.status : 0;
+        if (err instanceof ApiError) {
+          status = err.status;
+          code = errorCode(err.data) ?? code;
+        } else {
+          status = 0;
+        }
       }
 
-      const outcome = classifyFailure(status);
+      // upload_evidence has no client_request_id upstream, so a replay of an action that already
+      // went through (response lost) answers 409 invalid_transition. If the ticket now sits in
+      // awaiting_evidence the update is applied: success, not a drop. Unreadable state: retry.
+      if (item.kind === 'evidence' && status === 409 && code === 'invalid_transition' && item.attachment_ids?.length) {
+        const applied = await evidenceApplied(fetchFn, key);
+        if (applied) {
+          if (item.id !== undefined) await removeFromQueue(item.id);
+          synced++;
+          continue;
+        }
+        if (applied === null) status = 0;
+      }
+
+      const outcome = classifyFailure(status, code);
       if (outcome === 'auth') {
         // Keep this and every later entry; the caller shows a sign-in prompt.
         const stillQueued = queue.slice(index).filter((q) => !q.user || q.user === opts.username).length;
-        return { synced, failed: failed + stillQueued, dropped, authRequired: true, ...(otherUser > 0 ? { otherUser } : {}), ...(photosDropped > 0 ? { photosDropped } : {}) };
+        return { synced, failed: failed + stillQueued, dropped, authRequired: true, ...extras() };
       }
       if (item.id !== undefined && outcome === 'drop') {
         await removeFromQueue(item.id);
         dropped++;
-        if (opts.deleteEvidence) {
+        // Objects an evidence entry already registered are attachment rows now: keep them.
+        if (opts.deleteEvidence && !item.attachment_ids?.length) {
           await Promise.all(evidenceOf(item).map((u) => opts.deleteEvidence!(u).catch(() => undefined)));
         }
       } else {
+        if (outcome === 'locked') {
+          locked++;
+          if (item.id !== undefined && !item.locked) {
+            item.locked = true;
+            await updateEntry(item);
+          }
+        }
         failed++;
         held.add(key);
       }
     }
 
-    return { synced, failed, dropped, ...(otherUser > 0 ? { otherUser } : {}), ...(photosDropped > 0 ? { photosDropped } : {}) };
+    return { synced, failed, dropped, ...extras() };
   } finally {
     syncing = false;
   }

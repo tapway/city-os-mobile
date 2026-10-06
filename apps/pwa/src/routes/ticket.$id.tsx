@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, MapPin, Clock, AlertTriangle, MessageSquare, Camera, X } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, AlertTriangle, MessageSquare, Camera, X, Lock } from 'lucide-react';
 import { Button, Badge } from '@city-os/ui';
 import {
   getTicket,
@@ -9,6 +9,8 @@ import {
   statusUpdateRequest,
   sendStatusRequest,
   runTicketAction,
+  registerEvidence,
+  runEvidenceAction,
   deleteImage,
   uploadImage,
   storageUrl,
@@ -17,7 +19,10 @@ import {
 import { getActor, getSessionUser } from '../lib/auth';
 import { enqueueMutation, hasQueuedForTicket } from '../lib/offline-queue';
 import { submitStatusUpdate } from '../lib/submit-update';
-import { actionButtons, buildActionUpdate, staleConflictMessage, type FieldAction } from '../lib/ticket-actions';
+import { submitEvidence } from '../lib/submit-evidence';
+import { isTicketLocked } from '../lib/api';
+import { actionButtons, buildActionUpdate, staleConflictMessage, clampNote, noteCounter, type FieldAction } from '../lib/ticket-actions';
+import { MAX_NOTE_LENGTH, MAX_EVIDENCE_PHOTOS } from '../lib/help-api';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
 import { useLang } from '../i18n/react';
@@ -49,6 +54,8 @@ export function TicketDetailPage() {
 
   const [comment, setComment] = useState('');
   const [images, setImages] = useState<PendingImage[]>([]);
+  const imagesRef = useRef(0);
+  imagesRef.current = images.length;
   const [formError, setFormError] = useState<Msg | null>(null);
   const [notice, setNotice] = useState<Msg | null>(null);
 
@@ -82,6 +89,21 @@ export function TicketDetailPage() {
         if (await hasQueuedForTicket(ticketUid, user)) throw new MsgError('detail.err.pendingFirst');
         await runTicketAction(ticketUid, action, comment.trim() || undefined);
         return 'support' as const;
+      }
+      if (action === 'upload_evidence') {
+        // Photos -> upload -> register -> action; queued (blobs kept) offline or on a lapsed session.
+        const { outcome } = await submitEvidence(
+          {
+            hasQueued: hasQueuedForTicket,
+            upload: (file, uid) => uploadImage(file, uid),
+            register: registerEvidence,
+            act: runEvidenceAction,
+            remove: deleteImage,
+            enqueue: enqueueMutation,
+          },
+          { uid: ticketUid, photos: images.map((i) => i.file), user, comment: comment.trim() || undefined },
+        );
+        return outcome === 'saved' ? ('evidence' as const) : outcome;
       }
       if (!geo.isFresh || typeof geo.lat !== 'number' || typeof geo.lng !== 'number') {
         throw new MsgError('detail.err.needGps');
@@ -127,10 +149,14 @@ export function TicketDetailPage() {
         msgOf(
           saved === 'queued'
             ? 'detail.notice.queued'
+            : saved === 'queuedLocked'
+            ? 'offline.locked'
             : saved === 'queuedAuth'
               ? 'detail.notice.queuedAuth'
               : saved === 'support'
               ? 'detail.notice.supportRequested'
+              : saved === 'evidence'
+              ? 'detail.notice.evidenceSaved'
               : 'detail.notice.saved',
         ),
       );
@@ -141,6 +167,12 @@ export function TicketDetailPage() {
     },
     onError: (err: Error) => {
       setNotice(null);
+      if (isTicketLocked(err)) {
+        // Show the server's bilingual text and refetch so the lock indicator appears.
+        queryClient.invalidateQueries({ queryKey: ['ticket', ticketUid] });
+        setFormError(msgOf(err));
+        return;
+      }
       const stale = staleConflictMessage(err);
       if (stale) {
         // The ticket changed under us: refetch so the buttons match the server.
@@ -162,7 +194,9 @@ export function TicketDetailPage() {
     input.setAttribute('aria-label', t('detail.addPhotoAria'));
     input.onchange = (e) => {
       const files = Array.from((e.target as HTMLInputElement).files ?? []);
-      const next = files.map((file) => ({ file, preview: URL.createObjectURL(file) }));
+      // City Help registers at most 10 evidence photos per call: never offer more.
+      const room = Math.max(0, MAX_EVIDENCE_PHOTOS - imagesRef.current);
+      const next = files.slice(0, room).map((file) => ({ file, preview: URL.createObjectURL(file) }));
       setImages((prev) => [...prev, ...next]);
     };
     input.click();
@@ -207,7 +241,9 @@ export function TicketDetailPage() {
   }
 
   const detail: TicketDetail = ticket;
-  const buttons = actionButtons(detail.available_actions);
+  const locked = detail.is_locked === true;
+  // A locked ticket accepts no field updates (the server would 409 every one).
+  const buttons = locked ? [] : actionButtons(detail.available_actions);
   const gpsLabel = geo.fix
     ? `${geo.fix.lat.toFixed(6)}, ${geo.fix.lng.toFixed(6)}${geo.accuracy ? ` (±${Math.round(geo.accuracy)} m)` : ''} · ${formatFixAge(geo.ageMs)}`
     : t('detail.gpsNone');
@@ -249,6 +285,18 @@ export function TicketDetailPage() {
           {detail.jira_issue_key && <span>{t('detail.jira', { value: detail.jira_issue_key })}</span>}
         </div>
       </div>
+
+      {locked && (
+        <div
+          role="status"
+          data-testid="ticket-locked"
+          className="glass-panel"
+          style={{ padding: '12px 14px', marginBottom: 12, borderColor: 'rgba(245,158,11,0.5)', display: 'flex', gap: 8, alignItems: 'center' }}
+        >
+          <Lock size={15} style={{ color: 'var(--warn, #f59e0b)', flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: 'var(--ink)' }}>{t('detail.locked')}</span>
+        </div>
+      )}
 
       {/* SLA */}
       {detail.sla_deadline && (
@@ -354,22 +402,33 @@ export function TicketDetailPage() {
           <textarea
             id="update-comment"
             value={comment}
-            onChange={(e) => setComment(e.target.value)}
+            onChange={(e) => setComment(clampNote(e.target.value))}
+            maxLength={MAX_NOTE_LENGTH}
+            aria-describedby="update-comment-counter"
             placeholder={t('detail.commentPlaceholder')}
             style={{
               width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
               borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-              fontFamily: 'var(--font-body)', resize: 'vertical', minHeight: 64, marginBottom: 10,
+              fontFamily: 'var(--font-body)', resize: 'vertical', minHeight: 64, marginBottom: 2,
             }}
           />
+          <div
+            id="update-comment-counter"
+            data-testid="comment-counter"
+            style={{ textAlign: 'right', fontSize: 10, marginBottom: 10, color: comment.length >= MAX_NOTE_LENGTH ? 'var(--danger)' : 'var(--ink-faint)' }}
+          >
+            {noteCounter(comment)}
+          </div>
 
           {/* Evidence */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Button data-testid="ticket-add-photo" onClick={handleCapture} variant="outline" size="sm">
+            <Button data-testid="ticket-add-photo" onClick={handleCapture} variant="outline" size="sm" disabled={images.length >= MAX_EVIDENCE_PHOTOS}>
               <Camera size={14} /> {t('detail.addPhoto')}
             </Button>
             <span style={{ fontSize: 10, color: 'var(--ink-faint)' }}>
-              {images.length > 0 ? t('detail.photosAttached', { count: images.length }) : t('detail.photosOptional')}
+              {images.length >= MAX_EVIDENCE_PHOTOS
+                ? t('detail.photoLimit', { max: MAX_EVIDENCE_PHOTOS })
+                : images.length > 0 ? t('detail.photosAttached', { count: images.length }) : t('detail.photosOptional')}
             </span>
           </div>
           {images.length > 0 && (
@@ -408,14 +467,15 @@ export function TicketDetailPage() {
           {/* Actions offered by the server for this ticket */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {buttons.map((b) => {
-              const blocked = b.needsOnline ? !online : !geo.isFresh;
+              const blocked =
+                (b.needsOnline && !online) || (b.needsGps && !geo.isFresh) || (b.needsPhoto && images.length === 0);
               return (
                 <Button
                   key={b.action}
                   data-testid={b.testId}
                   onClick={() => updateMutation.mutate(b.action)}
                   disabled={blocked || updateMutation.isPending}
-                  variant={b.action === 'need_support' ? 'outline' : undefined}
+                  variant={b.action === 'need_support' || b.action === 'upload_evidence' ? 'outline' : undefined}
                   size="md"
                   style={{ flex: '1 1 40%' }}
                 >

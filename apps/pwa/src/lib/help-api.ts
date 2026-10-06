@@ -64,6 +64,24 @@ export interface TicketPage {
   offset: number;
 }
 
+/** City Help caps: PATCH status `note` is 4000 characters (422), list `q` is 200. */
+export const MAX_NOTE_LENGTH = 4000;
+export const MAX_QUERY_LENGTH = 200;
+/** City Help registers at most 10 attachments per call (RegisterAttachments.items max_length). */
+export const MAX_EVIDENCE_PHOTOS = 10;
+
+export function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** First `max` characters by code point, so an emoji is never cut into a lone surrogate. */
+export function clampChars(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length <= max ? text : chars.slice(0, max).join('');
+}
+
 export interface ListTicketsParams {
   q?: string;
   status?: string[];
@@ -81,7 +99,8 @@ export interface ListTicketsParams {
 /** Query string for the event list, as data so it can be unit-tested. */
 export function listTicketsQuery(params: ListTicketsParams = {}): string {
   const search = new URLSearchParams();
-  if (params.q?.trim()) search.set('q', params.q.trim());
+  const q = params.q ? clampChars(params.q.trim(), MAX_QUERY_LENGTH).trim() : '';
+  if (q) search.set('q', q);
   if (params.status?.length) search.set('status', params.status.join(','));
   if (params.source) search.set('source', params.source);
   if (params.incident_type) search.set('incident_type', params.incident_type);
@@ -202,6 +221,36 @@ export async function runTicketAction(uid: string, action: string, comment?: str
   return apiJson<TicketDetail>(actionPath(uid, action), {
     method: 'POST',
     body: JSON.stringify(comment ? { comment } : {}),
+  });
+}
+
+export function registerPath(uid: string): string {
+  return `/api/v1/events/${encodeURIComponent(uid)}/attachments/register`;
+}
+
+/** `/api/uploads/<key>` (what POST /api/uploads returns) -> the object key City Help registers. */
+export function keyOfUrl(url: string): string {
+  return url.startsWith('/api/uploads/') ? url.slice('/api/uploads/'.length) : url;
+}
+
+/** Turn BFF-stored objects into evidence attachment rows (idempotent upstream); returns their ids. */
+export async function registerEvidence(uid: string, keys: string[]): Promise<number[]> {
+  const ids: number[] = [];
+  for (const part of chunk(keys, MAX_EVIDENCE_PHOTOS)) {
+    const rows = await apiJson<{ id: number }[]>(registerPath(uid), {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'evidence', items: part.map((key) => ({ key })) }),
+    });
+    ids.push(...(Array.isArray(rows) ? rows : []).map((r) => r.id));
+  }
+  return ids;
+}
+
+/** Run the upload_evidence workflow action with already-registered attachment ids. */
+export async function runEvidenceAction(uid: string, attachmentIds: number[], comment?: string): Promise<TicketDetail> {
+  return apiJson<TicketDetail>(actionPath(uid, 'upload_evidence'), {
+    method: 'POST',
+    body: JSON.stringify({ attachment_ids: attachmentIds, ...(comment ? { comment } : {}) }),
   });
 }
 

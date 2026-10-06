@@ -35,3 +35,17 @@ describe('defaultTicketFilter', () => {
     expect(defaultTicketFilter(undefined)).toBe('all');
   });
 });
+
+describe('engineer default (M-F4)', () => {
+  it('uses To accept for handling staff when the probe found tickets', () => {
+    expect(defaultTicketFilter(['handling_staff'], { toAcceptCount: 3 })).toBe('to_accept');
+  });
+  it('falls back to Mine when the probe is empty, failed, offline or pending', () => {
+    expect(defaultTicketFilter(['handling_staff'], { toAcceptCount: 0 })).toBe('mine');
+    expect(defaultTicketFilter(['handling_staff'], { toAcceptCount: null })).toBe('mine');
+    expect(defaultTicketFilter(['handling_staff'])).toBe('mine');
+  });
+  it('never applies to other roles', () => {
+    expect(defaultTicketFilter(['intake'], { toAcceptCount: 5 })).toBe('all');
+  });
+});
