@@ -134,3 +134,45 @@ def test_traversal_never_reaches_the_upstream_host():
         resp = client.get(attack, headers={"Authorization": "Bearer test-token"})
         assert resp.status_code == 400, f"{attack} -> {resp.status_code}"
     assert not leaked.called, f"traversal reached the upstream host: {leaked.calls}"
+
+
+def test_proxy_forwards_attachment_register_with_json_body():
+    """M-F1: POST /api/v1/events/{uid}/attachments/register passes body and status through."""
+    upstream_url = f"{settings.city_help_api_url}/api/v1/events/TKT-1/attachments/register"
+    router = respx.mock()  # own router: the tripwire test above leaves a catch-all on the global one
+    route = router.post(upstream_url).mock(
+        return_value=httpx.Response(200, json=[{"id": 7, "kind": "evidence"}])
+    )
+    key = "mobile-attachments/TKT-1/20261003/ab12.jpg"
+    client = TestClient(app)
+    with router:
+        resp = client.post(
+            "/api/v1/events/TKT-1/attachments/register",
+            json={"kind": "evidence", "items": [{"key": key}]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        sent = route.calls.last.request  # calls reset when the router exits
+    assert resp.status_code == 200
+    assert resp.json() == [{"id": 7, "kind": "evidence"}]
+    assert sent.headers["authorization"] == "Bearer test-token"
+    assert sent.headers["content-type"].startswith("application/json")
+    assert key.encode() in sent.content
+
+
+def test_proxy_forwards_upload_evidence_action_and_error_body():
+    """M-F1/M-F2: the action body goes upstream; a bilingual 409 ticket_locked reaches the PWA intact."""
+    upstream_url = f"{settings.city_help_api_url}/api/v1/events/TKT-1/actions/upload_evidence"
+    locked = {"detail": {"code": "ticket_locked", "message_en": "locked", "message_bm": "dikunci"}}
+    router = respx.mock()  # own router, see above
+    route = router.post(upstream_url).mock(return_value=httpx.Response(409, json=locked))
+    client = TestClient(app)
+    with router:
+        resp = client.post(
+            "/api/v1/events/TKT-1/actions/upload_evidence",
+            json={"attachment_ids": [7, 8]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        sent = route.calls.last.request
+    assert resp.status_code == 409
+    assert resp.json() == locked
+    assert b'"attachment_ids"' in sent.content
