@@ -22,7 +22,9 @@ export const ids = {
   card: 'ticket-card',
   gps: 'ticket-gps-get',
   addPhoto: 'ticket-add-photo',
-  action: (name: 'accept' | 'start' | 'resume' | 'complete' | 'need_support') => `ticket-action-${name}`,
+  queueLocked: 'queue-locked-notice',
+  queueSendNow: 'queue-send-now',
+  action: (name: 'accept' | 'start' | 'resume' | 'complete' | 'need_support' | 'upload_evidence') => `ticket-action-${name}`,
 } as const;
 
 /** Sign in through the in-app form (never the Keycloak redirect) as `engineer`. */

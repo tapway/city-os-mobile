@@ -4,6 +4,7 @@
  *
  *   sign in -> Mine -> Accept -> Start (GPS) -> Complete (GPS + photo)
  *           -> evidence visible -> offline Start replays once
+ *           -> Add evidence after Complete -> locked ticket keeps the queued Start
  *
  * Every test creates its own ticket through the City Help API (operator +
  * dispatcher path, tagged UAT-<run>) and closes it afterwards.
@@ -21,7 +22,7 @@ import {
 } from './support/uat-env';
 import {
   createDispatchedTicket, acceptAsEngineer, startAsEngineer, closeTicket,
-  detail, timeline, legacyTimeline, call, tokenFor, storagePath, type UatTicket,
+  detail, timeline, legacyTimeline, act, call, tokenFor, storagePath, type UatTicket,
 } from './support/uat-api';
 import {
   ids, signIn, openTicket, lockGps, isStatusPatch, parseUpdate, expectJohorBahru, testPng,
@@ -240,5 +241,83 @@ test.describe('MOBILE UAT', () => {
       'one start event accepted -> in_progress',
     ).toHaveLength(1);
     expect(ids_seen.size, 'one logical update, one client_request_id').toBeLessThanOrEqual(1);
+  });
+
+  test('MOBILE-08 Add evidence after Complete moves done to awaiting_evidence', async ({ page }) => {
+    const t = await newTicket('add-evidence');
+    await acceptAsEngineer(t.uid);
+    await startAsEngineer(t.uid);
+    // Complete without a photo (API, as the engineer): the ticket parks in `done`.
+    await act('engineer', t.uid, 'complete');
+    const before = await detail('engineer', t.uid);
+    expect(before.workflow_state).toBe('done');
+    expect(before.available_actions?.map((a) => a.action)).toContain('upload_evidence');
+
+    await signIn(page);
+    await openTicket(page, t.uid);
+    await lockGps(page);
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      page.getByTestId(ids.addPhoto).click(),
+    ]);
+    await chooser.setFiles({ name: 'evidence.png', mimeType: 'image/png', buffer: testPng() });
+    await page.getByTestId(ids.action('upload_evidence')).click();
+
+    await expect.poll(async () => (await detail('engineer', t.uid)).workflow_state, { timeout: 40_000 })
+      .toBe('awaiting_evidence');
+    const d = await detail('operator', t.uid);
+    const evidence = (d.attachments ?? []).filter((a) => a.kind === 'evidence');
+    expect(evidence, 'exactly one evidence attachment').toHaveLength(1);
+    const path = storagePath(evidence[0]!);
+    expect(path, 'evidence is served by the mobile-attachments storage proxy')
+      .toMatch(/^\/api\/storage\/mobile-attachments\//);
+    const img = await fetch(`${HELP_URL}${path}`, {
+      headers: { Authorization: `Bearer ${await tokenFor('operator')}` },
+    });
+    expect(img.status).toBe(200);
+    expect(img.headers.get('content-type') ?? '').toMatch(/^image\//);
+  });
+
+  test('MOBILE-09 a locked ticket keeps the queued Start until it is unlocked', async ({ page, context }) => {
+    const t = await newTicket('locked-start');
+    await acceptAsEngineer(t.uid);
+    await signIn(page);
+    await openTicket(page, t.uid);
+    await lockGps(page);
+
+    await context.setOffline(true);
+    await page.getByTestId(ids.action('start')).click();
+    await page.waitForTimeout(1_500);
+
+    // Meanwhile the supervisor locks the ticket (four-eyes: engineer requests, supervisor approves).
+    // The engineer's `lock_request` through the legacy wrapper route, which returns the request id
+    // that `approve_request` needs (the action endpoint does not expose it).
+    const lockReq = await call<{ id: number }>('engineer', 'POST', `/api/v1/events/${t.uid}/lock`,
+      { reason: `${RUN_TAG} lock` });
+    expect(lockReq.ok, `lock request HTTP ${lockReq.status}`).toBe(true);
+    await act('supervisor', t.uid, 'approve_request', {
+      fields: { request_id: lockReq.body.id, request_kind: 'lock' }, comment: `${RUN_TAG} approve lock`,
+    });
+    expect((await detail('supervisor', t.uid)).is_locked, 'ticket is locked').toBe(true);
+    expect((await detail('supervisor', t.uid)).workflow_state).toBe('accepted');
+
+    await context.setOffline(false);
+    // Kept, not dropped: the locked notice shows (testid queue-locked-notice) and Send now stays offered.
+    await expect(page.getByTestId(ids.queueLocked)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId(ids.queueSendNow)).toBeVisible();
+    await page.waitForTimeout(2_000);
+    expect((await detail('engineer', t.uid)).workflow_state).toBe('accepted');
+
+    await act('engineer', t.uid, 'unlock');
+    await page.getByTestId(ids.queueSendNow).click();
+    await expect.poll(async () => (await detail('engineer', t.uid)).workflow_state, { timeout: 40_000 })
+      .toBe('in_progress');
+
+    await page.waitForTimeout(3_000);
+    const legacy = await legacyTimeline('engineer', t.uid);
+    expect(
+      legacy.filter((e) => e.event_type === 'start' && e.old_status === 'accepted' && e.new_status === 'in_progress'),
+      'one start event accepted -> in_progress',
+    ).toHaveLength(1);
   });
 });
