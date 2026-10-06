@@ -7,7 +7,7 @@
  * attachment ids once register went through); a permanent rejection removes only
  * objects that no attachment row references.
  */
-import { ApiError, shouldQueue } from './api';
+import { ApiError, isTicketLocked, shouldQueue } from './api';
 import { MsgError } from '../i18n';
 import { actionPath, keyOfUrl } from './help-api';
 import type { QueuedMutation, QueuedPhoto } from './offline-queue';
@@ -17,7 +17,7 @@ export interface EvidenceDeps {
   hasQueued: (uid: string, user: string) => Promise<boolean>;
   upload: (file: File, uid: string) => Promise<{ url: string }>;
   register: (uid: string, keys: string[]) => Promise<number[]>;
-  act: (uid: string, attachmentIds: number[]) => Promise<unknown>;
+  act: (uid: string, attachmentIds: number[], comment?: string) => Promise<unknown>;
   remove: (url: string) => Promise<void>;
   enqueue: (m: Omit<QueuedMutation, 'id' | 'created_at'>) => Promise<number>;
 }
@@ -26,23 +26,25 @@ const toQueued = (f: File): QueuedPhoto => ({ blob: f, name: f.name });
 
 export async function submitEvidence(
   deps: EvidenceDeps,
-  input: { uid: string; photos: File[]; user: string },
-): Promise<{ outcome: SubmitOutcome; result?: unknown }> {
-  const { uid, photos, user } = input;
+  input: { uid: string; photos: File[]; user: string; comment?: string },
+): Promise<{ outcome: SubmitOutcome | 'queuedLocked'; result?: unknown }> {
+  const { uid, photos, user, comment } = input;
   if (!user) throw new MsgError('err.sessionExpired');
   if (photos.length === 0) throw new MsgError('detail.err.needPhoto');
 
-  const queue = async (urls: string[], unsent: File[], ids: number[] | undefined, auth: boolean) => {
+  const queue = async (urls: string[], unsent: File[], ids: number[] | undefined, auth: boolean, locked = false) => {
     await deps.enqueue({
       url: actionPath(uid, 'upload_evidence'),
       method: 'POST',
       kind: 'evidence',
       user,
       body: { image_urls: urls },
+      ...(comment ? { comment } : {}),
+      ...(locked ? { locked: true } : {}),
       ...(ids?.length ? { attachment_ids: ids } : {}),
       ...(unsent.length ? { photos: unsent.map(toQueued) } : {}),
     });
-    return { outcome: (auth ? 'queuedAuth' : 'queued') as SubmitOutcome };
+    return { outcome: (locked ? 'queuedLocked' : auth ? 'queuedAuth' : 'queued') as SubmitOutcome | 'queuedLocked' };
   };
   const isAuth = (err: unknown) => err instanceof ApiError && err.status === 401;
   const cleanup = (urls: string[]) => Promise.all(urls.map((u) => deps.remove(u).catch(() => undefined)));
@@ -72,9 +74,11 @@ export async function submitEvidence(
   }
 
   try {
-    return { outcome: 'saved', result: await deps.act(uid, ids) };
+    return { outcome: 'saved', result: await deps.act(uid, ids, comment) };
   } catch (err) {
     if (shouldQueue(err)) return queue(urls, [], ids, isAuth(err));
+    // Locked: the objects are registered rows; keep them in the queue with their ids, sent once unlocked.
+    if (isTicketLocked(err)) return queue(urls, [], ids, false, true);
     throw err; // objects are registered attachments now: never delete them
   }
 }

@@ -1,6 +1,6 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import { ApiError, errorCode } from './api';
-import { keyOfUrl, registerPath } from './help-api';
+import { chunk, keyOfUrl, MAX_EVIDENCE_PHOTOS, registerPath } from './help-api';
 import { getSessionUser } from './auth';
 import type { Msg } from '../i18n';
 
@@ -25,6 +25,8 @@ export interface QueuedMutation {
   photos?: QueuedPhoto[];
   /** `evidence`: replay is upload photos -> register keys -> POST the action with the attachment ids. */
   kind?: 'evidence';
+  /** Optional comment sent with the upload_evidence action. */
+  comment?: string;
   /** Evidence attachments already registered upstream; a retry skips straight to the action. */
   attachment_ids?: number[];
   /** The last replay got 409 ticket_locked: kept (with its evidence), sent once unlocked. */
@@ -219,6 +221,21 @@ function evidenceOf(item: QueuedMutation): string[] {
   return Array.isArray(urls) ? urls.filter((u): u is string => typeof u === 'string') : [];
 }
 
+/** True when the ticket is in awaiting_evidence (the state upload_evidence leads to); null if unreadable. */
+async function evidenceApplied(
+  fetchFn: (url: string, init: RequestInit) => Promise<Response>,
+  uid: string,
+): Promise<boolean | null> {
+  try {
+    const resp = await fetchFn(`/api/v1/events/${encodeURIComponent(uid)}`, { method: 'GET' });
+    if (!resp.ok) return null;
+    const detail = (await resp.json()) as { workflow_state?: string | null };
+    return detail?.workflow_state === 'awaiting_evidence';
+  } catch {
+    return null;
+  }
+}
+
 /** Flush guard so two triggers (reconnect + focus) never replay twice. */
 let syncing = false;
 
@@ -295,24 +312,33 @@ export async function syncQueue(
         if (item.kind === 'evidence') {
           // Register once; the ids are persisted so a failed action does not re-register.
           if (!item.attachment_ids?.length) {
-            const reg = await fetchFn(registerPath(key), {
-              method: 'POST',
-              body: JSON.stringify({ kind: 'evidence', items: evidenceOf(item).map((u) => ({ key: keyOfUrl(u) })) }),
-              headers: { 'Content-Type': 'application/json' },
-            });
-            if (!reg.ok) {
-              status = reg.status;
-              code = errorCode(await reg.clone().text().catch(() => ''));
-              throw new ApiError(status, 'register failed', null);
+            // City Help registers at most 10 items per call; chunk as a backstop for big queued entries.
+            const ids: number[] = [];
+            for (const part of chunk(evidenceOf(item), MAX_EVIDENCE_PHOTOS)) {
+              const reg = await fetchFn(registerPath(key), {
+                method: 'POST',
+                body: JSON.stringify({ kind: 'evidence', items: part.map((u) => ({ key: keyOfUrl(u) })) }),
+                headers: { 'Content-Type': 'application/json' },
+              });
+              if (!reg.ok) {
+                status = reg.status;
+                code = errorCode(await reg.clone().text().catch(() => ''));
+                throw new ApiError(status, 'register failed', null);
+              }
+              const rows = (await reg.json().catch(() => [])) as { id: number }[];
+              ids.push(...(Array.isArray(rows) ? rows : []).map((r) => r.id));
             }
-            const rows = (await reg.json().catch(() => [])) as { id: number }[];
-            item.attachment_ids = (Array.isArray(rows) ? rows : []).map((r) => r.id);
+            item.attachment_ids = ids;
             await updateEntry(item);
           }
         }
         const resp = await fetchFn(item.url, {
           method: item.method,
-          body: JSON.stringify(item.kind === 'evidence' ? { attachment_ids: item.attachment_ids } : item.body),
+          body: JSON.stringify(
+            item.kind === 'evidence'
+              ? { attachment_ids: item.attachment_ids, ...(item.comment ? { comment: item.comment } : {}) }
+              : item.body,
+          ),
           headers: { 'Content-Type': 'application/json' },
         });
         if (resp.ok) {
@@ -329,6 +355,19 @@ export async function syncQueue(
         } else {
           status = 0;
         }
+      }
+
+      // upload_evidence has no client_request_id upstream, so a replay of an action that already
+      // went through (response lost) answers 409 invalid_transition. If the ticket now sits in
+      // awaiting_evidence the update is applied: success, not a drop. Unreadable state: retry.
+      if (item.kind === 'evidence' && status === 409 && code === 'invalid_transition' && item.attachment_ids?.length) {
+        const applied = await evidenceApplied(fetchFn, key);
+        if (applied) {
+          if (item.id !== undefined) await removeFromQueue(item.id);
+          synced++;
+          continue;
+        }
+        if (applied === null) status = 0;
       }
 
       const outcome = classifyFailure(status, code);

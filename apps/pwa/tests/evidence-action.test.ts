@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
 import { actionButtons } from '../src/lib/ticket-actions';
-import { registerPath, keyOfUrl } from '../src/lib/help-api';
+import { registerPath, keyOfUrl, registerEvidence, chunk, MAX_EVIDENCE_PHOTOS } from '../src/lib/help-api';
 import { submitEvidence, type EvidenceDeps } from '../src/lib/submit-evidence';
 import { ApiError } from '../src/lib/api';
 import { syncQueue, enqueueMutation, getQueue, clearQueue } from '../src/lib/offline-queue';
@@ -57,7 +57,7 @@ describe('submitEvidence (live)', () => {
       'mobile-attachments/T-1/20261003/a.jpg',
       'mobile-attachments/T-1/20261003/b.jpg',
     ]);
-    expect(d.act).toHaveBeenCalledWith('T-1', [11, 12]);
+    expect(d.act).toHaveBeenCalledWith('T-1', [11, 12], undefined);
     expect(d.enqueue).not.toHaveBeenCalled();
   });
   it('requires at least one photo and a user', async () => {
@@ -186,5 +186,121 @@ describe('replay of a queued evidence action', () => {
     const res = await syncQueue(fetchFn, { username: 'ali' });
     expect(fetchFn).not.toHaveBeenCalled();
     expect(res.otherUser).toBe(1);
+  });
+});
+
+describe('comment is sent with the action', () => {
+  it('live: passes the typed comment to the action', async () => {
+    const d = deps();
+    await submitEvidence(d, { ...input, comment: 'rubbish cleared' });
+    expect(d.act).toHaveBeenCalledWith('T-1', [11, 12], 'rubbish cleared');
+  });
+  it('queued: the comment rides on the entry', async () => {
+    const d = deps({ act: vi.fn(async () => { throw new ApiError(0, 'off'); }) });
+    await submitEvidence(d, { ...input, comment: 'note' });
+    expect((d.enqueue as ReturnType<typeof vi.fn>).mock.calls[0]![0].comment).toBe('note');
+  });
+});
+
+describe('locked on the live action (409 ticket_locked)', () => {
+  it('queues WITH the registered ids, flagged locked, instead of throwing', async () => {
+    const lockedErr = new ApiError(409, 'locked', JSON.stringify({ detail: { code: 'ticket_locked' } }));
+    const d = deps({ act: vi.fn(async () => { throw lockedErr; }) });
+    const r = await submitEvidence(d, input);
+    expect(r.outcome).toBe('queuedLocked');
+    const q = (d.enqueue as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(q).toMatchObject({ kind: 'evidence', attachment_ids: [11, 12], locked: true });
+    expect(d.remove).not.toHaveBeenCalled();
+  });
+});
+
+describe('10 items per register call', () => {
+  it('constant and chunking', () => {
+    expect(MAX_EVIDENCE_PHOTOS).toBe(10);
+    expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+  it.each([11, 23])('registerEvidence splits %i keys into <=10 calls and concatenates ids in order', async (n) => {
+    const keys = Array.from({ length: n }, (_, i) => `mobile-attachments/T-1/d/${i}.jpg`);
+    const sizes: number[] = [];
+    let next = 100;
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      const items = JSON.parse(init.body as string).items as unknown[];
+      sizes.push(items.length);
+      return new Response(JSON.stringify(items.map(() => ({ id: next++ }))), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as never;
+    try {
+      const ids = await registerEvidence('T-1', keys);
+      expect(sizes.every((s) => s <= 10)).toBe(true);
+      expect(sizes.reduce((a, b) => a + b, 0)).toBe(n);
+      expect(ids).toEqual(Array.from({ length: n }, (_, i) => 100 + i));
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+  it('offline replay registers 23 queued urls in 3 calls and acts once with all ids', async () => {
+    await clearQueue();
+    const urls = Array.from({ length: 23 }, (_, i) => `/api/uploads/mobile-attachments/T-1/d/${i}.jpg`);
+    await enqueueMutation({ url: '/api/v1/events/T-1/actions/upload_evidence', method: 'POST', kind: 'evidence', user: 'ali', body: { image_urls: urls } } as never);
+    const sizes: number[] = [];
+    let next = 1;
+    let actBody: any = null;
+    const res = await syncQueue(async (url, init) => {
+      const b = JSON.parse(init.body as string);
+      if (url.endsWith('/register')) {
+        sizes.push(b.items.length);
+        return new Response(JSON.stringify(b.items.map(() => ({ id: next++ }))), { status: 200 });
+      }
+      actBody = b;
+      return new Response('{}', { status: 200 });
+    }, { username: 'ali' });
+    expect(res.synced).toBe(1);
+    expect(sizes).toEqual([10, 10, 3]);
+    expect(actBody.attachment_ids).toEqual(Array.from({ length: 23 }, (_, i) => i + 1));
+  });
+});
+
+describe('replay idempotency (action has no client_request_id upstream)', () => {
+  beforeEach(async () => { await clearQueue(); });
+  const entry = () => enqueueMutation({ url: '/api/v1/events/T-1/actions/upload_evidence', method: 'POST', kind: 'evidence', user: 'ali', attachment_ids: [5], body: { image_urls: [`/api/uploads/${KEY}`] } } as never);
+  const invalid = JSON.stringify({ detail: { code: 'invalid_transition' } });
+
+  it('409 invalid_transition + ticket now awaiting_evidence = already applied: synced, not dropped, queue cleared', async () => {
+    await entry();
+    const del = vi.fn();
+    const res = await syncQueue(async (url) => {
+      if (url === '/api/v1/events/T-1') return new Response(JSON.stringify({ workflow_state: 'awaiting_evidence' }), { status: 200 });
+      return new Response(invalid, { status: 409 });
+    }, { username: 'ali', deleteEvidence: del });
+    expect(res).toMatchObject({ synced: 1, dropped: 0, failed: 0 });
+    expect(del).not.toHaveBeenCalled();
+    expect(await getQueue()).toHaveLength(0);
+  });
+  it('same when the 409 is thrown as an ApiError', async () => {
+    await entry();
+    const res = await syncQueue(async (url) => {
+      if (url === '/api/v1/events/T-1') return new Response(JSON.stringify({ workflow_state: 'awaiting_evidence' }), { status: 200 });
+      throw new ApiError(409, 'x', invalid);
+    }, { username: 'ali' });
+    expect(res).toMatchObject({ synced: 1, dropped: 0 });
+  });
+  it('409 invalid_transition with the ticket in another state is still a drop (registered objects kept)', async () => {
+    await entry();
+    const del = vi.fn();
+    const res = await syncQueue(async (url) => {
+      if (url === '/api/v1/events/T-1') return new Response(JSON.stringify({ workflow_state: 'closed' }), { status: 200 });
+      return new Response(invalid, { status: 409 });
+    }, { username: 'ali', deleteEvidence: del });
+    expect(res).toMatchObject({ synced: 0, dropped: 1 });
+    expect(del).not.toHaveBeenCalled();
+  });
+  it('if the state re-read fails, the entry stays queued (retry), not dropped', async () => {
+    await entry();
+    const res = await syncQueue(async (url) => {
+      if (url === '/api/v1/events/T-1') throw new ApiError(503, 'down');
+      return new Response(invalid, { status: 409 });
+    }, { username: 'ali' });
+    expect(res).toMatchObject({ dropped: 0, failed: 1 });
+    expect(await getQueue()).toHaveLength(1);
   });
 });

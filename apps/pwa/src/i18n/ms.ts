@@ -149,6 +149,7 @@ export const ms: Record<MessageKey, string> = {
   'detail.notice.evidenceSaved': 'Bukti ditambah pada tiket.',
   'offline.locked': 'Tiket dikunci oleh penyelia; kemas kini anda disimpan dan akan dihantar apabila kunci dibuka',
   'detail.locked': 'Tiket ini dikunci oleh penyelia. Kemas kini dijeda sehingga kunci dibuka.',
+  'detail.photoLimit': 'Had gambar dicapai ({max} setiap kemas kini)',
   'action.resolve': 'Hantar penyelesaian',
   'action.note.start': 'Mula bertugas di lokasi',
   'action.note.resolve': 'Kerja selesai di lokasi',

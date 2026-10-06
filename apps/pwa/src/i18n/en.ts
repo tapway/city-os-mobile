@@ -157,6 +157,7 @@ export const en = {
   'detail.notice.evidenceSaved': 'Evidence added to the ticket.',
   'offline.locked': 'Ticket is locked by a supervisor; your update is saved and will be sent when it is unlocked',
   'detail.locked': 'This ticket is locked by a supervisor. Updates are paused until it is unlocked.',
+  'detail.photoLimit': 'Photo limit reached ({max} per update)',
   'action.resolve': 'Submit resolution',
   'action.note.start': 'Started handling on site',
   'action.note.resolve': 'Work completed on site',

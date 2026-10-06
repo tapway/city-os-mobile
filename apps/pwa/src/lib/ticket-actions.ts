@@ -6,7 +6,7 @@
  * app/core/actions.py `_view`). The PWA never decides what is allowed: it shows
  * a button only when the matching `action` is in that list.
  */
-import { actionPath, MAX_NOTE_LENGTH, type StatusUpdate } from './help-api';
+import { actionPath, clampChars, MAX_NOTE_LENGTH, type StatusUpdate } from './help-api';
 import { ApiError, isTicketLocked } from './api';
 import type { MessageKey, Msg } from '../i18n';
 
@@ -97,9 +97,9 @@ export function staleConflictMessage(err: unknown): Msg | null {
 
 /** Cut a (pasted) note to the server's 4000-character cap. */
 export function clampNote(note: string): string {
-  return note.slice(0, MAX_NOTE_LENGTH);
+  return clampChars(note, MAX_NOTE_LENGTH);
 }
 
 export function noteCounter(note: string): string {
-  return `${note.length}/${MAX_NOTE_LENGTH}`;
+  return `${Array.from(note).length}/${MAX_NOTE_LENGTH}`;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, MapPin, Clock, AlertTriangle, MessageSquare, Camera, X, Lock } from 'lucide-react';
@@ -22,7 +22,7 @@ import { submitStatusUpdate } from '../lib/submit-update';
 import { submitEvidence } from '../lib/submit-evidence';
 import { isTicketLocked } from '../lib/api';
 import { actionButtons, buildActionUpdate, staleConflictMessage, clampNote, noteCounter, type FieldAction } from '../lib/ticket-actions';
-import { MAX_NOTE_LENGTH } from '../lib/help-api';
+import { MAX_NOTE_LENGTH, MAX_EVIDENCE_PHOTOS } from '../lib/help-api';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
 import { useLang } from '../i18n/react';
@@ -54,6 +54,8 @@ export function TicketDetailPage() {
 
   const [comment, setComment] = useState('');
   const [images, setImages] = useState<PendingImage[]>([]);
+  const imagesRef = useRef(0);
+  imagesRef.current = images.length;
   const [formError, setFormError] = useState<Msg | null>(null);
   const [notice, setNotice] = useState<Msg | null>(null);
 
@@ -99,7 +101,7 @@ export function TicketDetailPage() {
             remove: deleteImage,
             enqueue: enqueueMutation,
           },
-          { uid: ticketUid, photos: images.map((i) => i.file), user },
+          { uid: ticketUid, photos: images.map((i) => i.file), user, comment: comment.trim() || undefined },
         );
         return outcome === 'saved' ? ('evidence' as const) : outcome;
       }
@@ -147,6 +149,8 @@ export function TicketDetailPage() {
         msgOf(
           saved === 'queued'
             ? 'detail.notice.queued'
+            : saved === 'queuedLocked'
+            ? 'offline.locked'
             : saved === 'queuedAuth'
               ? 'detail.notice.queuedAuth'
               : saved === 'support'
@@ -190,7 +194,9 @@ export function TicketDetailPage() {
     input.setAttribute('aria-label', t('detail.addPhotoAria'));
     input.onchange = (e) => {
       const files = Array.from((e.target as HTMLInputElement).files ?? []);
-      const next = files.map((file) => ({ file, preview: URL.createObjectURL(file) }));
+      // City Help registers at most 10 evidence photos per call: never offer more.
+      const room = Math.max(0, MAX_EVIDENCE_PHOTOS - imagesRef.current);
+      const next = files.slice(0, room).map((file) => ({ file, preview: URL.createObjectURL(file) }));
       setImages((prev) => [...prev, ...next]);
     };
     input.click();
@@ -416,11 +422,13 @@ export function TicketDetailPage() {
 
           {/* Evidence */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Button data-testid="ticket-add-photo" onClick={handleCapture} variant="outline" size="sm">
+            <Button data-testid="ticket-add-photo" onClick={handleCapture} variant="outline" size="sm" disabled={images.length >= MAX_EVIDENCE_PHOTOS}>
               <Camera size={14} /> {t('detail.addPhoto')}
             </Button>
             <span style={{ fontSize: 10, color: 'var(--ink-faint)' }}>
-              {images.length > 0 ? t('detail.photosAttached', { count: images.length }) : t('detail.photosOptional')}
+              {images.length >= MAX_EVIDENCE_PHOTOS
+                ? t('detail.photoLimit', { max: MAX_EVIDENCE_PHOTOS })
+                : images.length > 0 ? t('detail.photosAttached', { count: images.length }) : t('detail.photosOptional')}
             </span>
           </div>
           {images.length > 0 && (

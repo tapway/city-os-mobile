@@ -44,3 +44,24 @@ export function defaultTicketFilter(
   if (!roles?.includes('handling_staff')) return 'all';
   return (probe.toAcceptCount ?? 0) > 0 ? 'to_accept' : 'mine';
 }
+
+export type DefaultView = 'to_accept' | 'mine' | 'all';
+
+/**
+ * The default view with a latch. Until the To accept probe settles an engineer
+ * sees Mine (loading); the first settled answer is latched and never revisited,
+ * so accepting the last ticket does not bounce the screen to Mine and a new
+ * dispatch ticket does not pull an engineer off Mine mid-session. The caller
+ * stores `latched` and passes it back in.
+ */
+export function resolveDefaultView(
+  latched: DefaultView | null,
+  roles: readonly string[] | undefined,
+  probe: { settled: boolean; count: number | null },
+): { view: DefaultView; latched: DefaultView | null; probing: boolean } {
+  if (!roles?.includes('handling_staff')) return { view: 'all', latched: null, probing: false };
+  if (latched) return { view: latched, latched, probing: false };
+  if (!probe.settled) return { view: 'mine', latched: null, probing: true };
+  const view = defaultTicketFilter(roles, { toAcceptCount: probe.count });
+  return { view, latched: view, probing: false };
+}
