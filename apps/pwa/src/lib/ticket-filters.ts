@@ -26,10 +26,21 @@ export const TICKET_FILTERS: TicketFilter[] = [
 ];
 
 /**
- * Role-based default for the ticket list: Mine for handling staff (they work an
- * assigned queue), All for everyone else. To accept is a chip, not the default:
- * the server's state=dispatch is not yet scoped to the caller's department.
+ * Role-based default for the ticket list: handling staff work an assigned queue,
+ * everyone else sees All.
+ *
+ * Handling staff open on To accept only when a probe of that list found tickets
+ * (`toAcceptCount` > 0). Since City Help T1.20 the server scopes state=dispatch
+ * to the caller's own department for handling staff (fail-closed), so a
+ * non-empty answer is theirs to accept. An empty, failed, offline or still
+ * pending probe (null/undefined) falls back to Mine, so the screen never opens
+ * empty or on a stale guess. Ruling M-8 had reverted this while dispatch was
+ * unscoped.
  */
-export function defaultTicketFilter(roles: readonly string[] | undefined): 'mine' | 'all' {
-  return roles?.includes('handling_staff') ? 'mine' : 'all';
+export function defaultTicketFilter(
+  roles: readonly string[] | undefined,
+  probe: { toAcceptCount?: number | null } = {},
+): 'to_accept' | 'mine' | 'all' {
+  if (!roles?.includes('handling_staff')) return 'all';
+  return (probe.toAcceptCount ?? 0) > 0 ? 'to_accept' : 'mine';
 }
