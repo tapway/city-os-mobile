@@ -4,7 +4,7 @@ import { logout, getSessionUser } from '../lib/auth';
 import { canCreateTickets } from '../lib/permissions';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useOfflineSync } from '../hooks/useOfflineSync';
-import { authNotice, syncNotice, otherUserNotice, photoDroppedNotice, logoutWarning } from '../lib/offline-queue';
+import { authNotice, syncNotice, otherUserNotice, photoDroppedNotice, lockedNotice, logoutWarning } from '../lib/offline-queue';
 import { useLang } from '../i18n/react';
 import { LanguageToggle } from '../i18n/LanguageToggle';
 
@@ -32,6 +32,7 @@ export function RootLayout() {
   const signInNotice = authNotice(lastResult);
   const heldNotice = otherUserNotice(lastResult);
   const photoNotice = photoDroppedNotice(lastResult);
+  const lockNotice = lockedNotice(lastResult);
   const showCreate = canCreateTickets(getSessionUser()?.roles);
 
   const signOut = () => {
@@ -115,6 +116,18 @@ export function RootLayout() {
             }}
           >
             {tm(photoNotice)}
+          </div>
+        )}
+        {!isLogin && lockNotice && (
+          <div
+            role="status"
+            data-testid="queue-locked-notice"
+            style={{
+              padding: '8px 16px', background: 'rgba(245,158,11,0.12)', borderBottom: '1px solid var(--border)',
+              fontSize: 12, color: 'var(--ink)',
+            }}
+          >
+            {tm(lockNotice)}
           </div>
         )}
         {!isLogin && droppedNotice && (
