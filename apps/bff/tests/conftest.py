@@ -4,9 +4,16 @@ Settings are mutated by several tests (origins, upload limits, storage). This
 autouse fixture snapshots and restores them so one test cannot change what
 another one sees.
 """
+import os
+
 import pytest
 
-from src.settings import Settings, settings
+# The tests call the app over plain HTTP, so a Secure cookie is never sent back.
+# Force the test value before settings load, so a developer's .env (COOKIE_SECURE=true
+# for HTTPS deployments) cannot break the suite.
+os.environ["COOKIE_SECURE"] = "false"
+
+from src.settings import Settings, settings  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
