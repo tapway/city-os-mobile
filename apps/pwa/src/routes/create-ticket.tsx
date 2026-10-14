@@ -1,21 +1,32 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowLeft, MapPin, Camera } from 'lucide-react';
+import { ArrowLeft, MapPin, Camera, X } from 'lucide-react';
 import { Button } from '@city-os/ui';
-import { apiJson } from '../lib/api';
-import { useGeolocation } from '../hooks/useGeolocation';
+import { createTicket, listIncidentTypes, uploadImage, type IncidentType } from '../lib/help-api';
+import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useLang } from '../i18n/react';
+import { incidentTypeLabel, incidentGroupLabel } from '../i18n/labels';
+import { MsgError, msgOf, type Msg, type MessageKey } from '../i18n';
 
-interface IncidentType {
-  id: number;
-  code: string;
-  name_en: string;
-  group_type: string;
+const URGENCY_KEYS: Record<'low' | 'medium' | 'high' | 'critical', MessageKey> = {
+  low: 'priority.LOW',
+  medium: 'priority.MEDIUM',
+  high: 'priority.HIGH',
+  critical: 'priority.CRITICAL',
+};
+
+interface PendingImage {
+  file: File;
+  preview: string;
 }
 
 export function CreateTicketPage() {
+  const { t, tm, lang } = useLang();
   const navigate = useNavigate();
-  const geo = useGeolocation();
+  const geo = useGeolocation({ auto: true });
+  const online = useOnlineStatus();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -23,32 +34,33 @@ export function CreateTicketPage() {
   const [urgency, setUrgency] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
   const [reporterName, setReporterName] = useState('');
   const [reporterContact, setReporterContact] = useState('');
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [error, setError] = useState('');
+  const [images, setImages] = useState<PendingImage[]>([]);
+  const [error, setError] = useState<Msg | null>(null);
 
-  // Fetch incident types
-  const { data: incidentTypes } = useQuery({
+  const { data: incidentTypes, error: typesError } = useQuery({
     queryKey: ['incident-types'],
-    queryFn: async () => {
-      const raw = await apiJson('/api/v1/incident-types');
-      return Array.isArray(raw) ? (raw as IncidentType[]) : [];
-    },
+    queryFn: listIncidentTypes,
   });
 
-  // Group by domain
-  const groupedTypes = (incidentTypes || []).reduce<Record<string, IncidentType[]>>((acc, t) => {
-    (acc[t.group_type] = acc[t.group_type] || []).push(t);
+  const groupedTypes = (incidentTypes || []).reduce<Record<string, IncidentType[]>>((acc, it) => {
+    const group = it.group_type || '';
+    (acc[group] = acc[group] || []).push(it);
     return acc;
   }, {});
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      if (!geo.lat || !geo.lng) throw new Error('GPS position required');
-      if (!title.trim()) throw new Error('Title is required');
+      if (!title.trim()) throw new MsgError('create.err.title');
+      if (!geo.isFresh || typeof geo.lat !== 'number' || typeof geo.lng !== 'number') {
+        throw new MsgError('detail.err.needGps');
+      }
+      if (!online) throw new MsgError('create.err.offline');
 
-      const body: Record<string, any> = {
+      const uploaded = await Promise.all(images.map((i) => uploadImage(i.file)));
+
+      return createTicket({
         title: title.trim(),
-        description: description.trim(),
+        description: description.trim() || undefined,
         source: 'mobile',
         lat: geo.lat,
         lng: geo.lng,
@@ -56,146 +68,156 @@ export function CreateTicketPage() {
         incident_type_code: incidentTypeCode || undefined,
         reporter_name: reporterName.trim() || undefined,
         reporter_contact: reporterContact.trim() || undefined,
-        image_urls: photo ? [photo] : undefined,
-      };
-
-      const raw = await apiJson('/api/v1/tickets', {
-        method: 'POST',
-        body: JSON.stringify(body),
+        reporting_method: 'mobile',
+        image_urls: uploaded.length ? uploaded.map((u) => u.url) : undefined,
       });
-      return raw;
     },
-    onSuccess: (data: any) => {
-      // Navigate to the new ticket detail
-      const ticketId = data?.id || data?.ticket_uid;
-      if (ticketId) {
-        navigate({ to: `/tickets/${ticketId}` });
+    onSuccess: (ticket) => {
+      images.forEach((i) => URL.revokeObjectURL(i.preview));
+      setImages([]);
+      if (ticket?.ticket_uid) {
+        navigate({ to: '/tickets/$id', params: { id: ticket.ticket_uid } });
       } else {
         navigate({ to: '/tickets' });
       }
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => setError(msgOf(err)),
   });
 
-  const handlePhotoCapture = () => {
+  const handleCapture = () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
     input.capture = 'environment';
+    input.multiple = true;
     input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = () => setPhoto(reader.result as string);
-        reader.readAsDataURL(file);
-      }
+      const files = Array.from((e.target as HTMLInputElement).files ?? []);
+      setImages((prev) => [...prev, ...files.map((file) => ({ file, preview: URL.createObjectURL(file) }))]);
     };
     input.click();
   };
 
-  const canSubmit = title.trim() && geo.lat && geo.lng;
+  const removeImage = (index: number) => {
+    setImages((prev) => {
+      URL.revokeObjectURL(prev[index]!.preview);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const canSubmit = Boolean(title.trim()) && geo.isFresh && online;
 
   return (
     <div className="app-content" style={{ padding: '16px' }}>
-      {/* Back button */}
       <button
+        type="button"
         onClick={() => navigate({ to: '/tickets' })}
         style={{
-          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12,
-          background: 'none', border: 'none', color: 'var(--cyan)', cursor: 'pointer',
-          fontFamily: 'var(--font-label)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em',
+          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, background: 'none',
+          border: 'none', color: 'var(--cyan)', cursor: 'pointer', fontFamily: 'var(--font-label)',
+          fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em',
         }}
       >
-        <ArrowLeft size={16} /> Cancel
+        <ArrowLeft size={16} /> {t('create.cancel')}
       </button>
 
       <h1 style={{ fontSize: 18, fontWeight: 600, color: 'var(--ink)', marginBottom: 16 }}>
-        Report Incident
+        {t('create.title')}
       </h1>
 
-      {/* GPS Card */}
+      {/* GPS */}
       <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <MapPin size={16} style={{ color: 'var(--cyan)' }} />
-          <span className="hud-label">Location</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <MapPin size={16} style={{ color: geo.isFresh ? 'var(--cyan)' : 'var(--ink-dim)' }} />
+          <span className="hud-label">{t('create.location')}</span>
         </div>
         <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 8 }}>
-          {geo.lat
-            ? `${geo.lat.toFixed(6)}, ${geo.lng?.toFixed(6)}`
-            : 'GPS not acquired'}
+          {geo.fix
+            ? `${geo.fix.lat.toFixed(6)}, ${geo.fix.lng.toFixed(6)}${geo.accuracy ? ` (±${Math.round(geo.accuracy)} m)` : ''} · ${formatFixAge(geo.ageMs)}`
+            : t('create.noGps')}
         </p>
-        <Button
-          onClick={() => geo.getPosition()}
-          variant="outline"
-          size="sm"
-          disabled={geo.loading}
-        >
-          {geo.loading ? 'Getting GPS...' : 'Get GPS Position'}
+        <Button onClick={() => geo.getPosition()} variant="outline" size="sm" disabled={geo.loading}>
+          {geo.loading ? t('detail.gpsLocating') : t('detail.gpsGet')}
         </Button>
-        {geo.error && <p style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>{geo.error}</p>}
+        {geo.error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>{tm(geo.error)}</p>}
       </div>
 
       {/* Title */}
       <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
-        <span className="hud-label" style={{ marginBottom: 6, display: 'block' }}>Title *</span>
+        <label htmlFor="incident-title" className="hud-label" style={{ marginBottom: 6, display: 'block' }}>
+          {t('create.titleLabel')}
+        </label>
         <input
+          id="incident-title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Describe the incident..."
+          placeholder={t('create.titlePlaceholder')}
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 13,
-            fontFamily: 'var(--font-body)', outline: 'none',
+            fontFamily: 'var(--font-body)',
           }}
         />
       </div>
 
       {/* Description */}
       <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
-        <span className="hud-label" style={{ marginBottom: 6, display: 'block' }}>Description</span>
+        <label htmlFor="incident-description" className="hud-label" style={{ marginBottom: 6, display: 'block' }}>
+          {t('create.description')}
+        </label>
         <textarea
+          id="incident-description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Provide details about the incident..."
+          placeholder={t('create.descriptionPlaceholder')}
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-            fontFamily: 'var(--font-body)', resize: 'vertical', minHeight: 80, outline: 'none',
+            fontFamily: 'var(--font-body)', resize: 'vertical', minHeight: 80,
           }}
         />
       </div>
 
-      {/* Incident Type */}
+      {/* Incident type */}
       <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
-        <span className="hud-label" style={{ marginBottom: 6, display: 'block' }}>Incident Type</span>
+        <label htmlFor="incident-type" className="hud-label" style={{ marginBottom: 6, display: 'block' }}>
+          {t('create.type')}
+        </label>
         <select
+          id="incident-type"
           value={incidentTypeCode}
           onChange={(e) => setIncidentTypeCode(e.target.value)}
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-            fontFamily: 'var(--font-body)', outline: 'none',
+            fontFamily: 'var(--font-body)',
           }}
         >
-          <option value="">— Select type —</option>
+          <option value="">{t('create.selectType')}</option>
           {Object.entries(groupedTypes).map(([group, types]) => (
-            <optgroup key={group} label={group}>
-              {types.map((t) => (
-                <option key={t.code} value={t.code}>{t.name_en || t.code}</option>
+            <optgroup key={group} label={incidentGroupLabel(group, lang)}>
+              {types.map((it) => (
+                <option key={it.code} value={it.code}>{incidentTypeLabel(it, lang)}</option>
               ))}
             </optgroup>
           ))}
         </select>
+        {typesError && (
+          <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>
+            {t('create.typesError', { message: (typesError as Error).message })}
+          </p>
+        )}
       </div>
 
       {/* Urgency */}
-      <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
-        <span className="hud-label" style={{ marginBottom: 6, display: 'block' }}>Urgency</span>
+      <fieldset className="glass-panel" style={{ padding: '14px', marginBottom: 12, border: '1px solid var(--border)' }}>
+        <legend className="hud-label" style={{ padding: '0 4px' }}>{t('create.urgency')}</legend>
         <div style={{ display: 'flex', gap: 6 }}>
           {(['low', 'medium', 'high', 'critical'] as const).map((u) => (
             <button
               key={u}
+              type="button"
               onClick={() => setUrgency(u)}
+              aria-pressed={urgency === u}
               style={{
                 flex: 1, padding: '8px 4px', fontSize: 10, fontFamily: 'var(--font-label)',
                 textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer',
@@ -205,67 +227,80 @@ export function CreateTicketPage() {
                 borderRadius: 2, transition: 'all 0.2s',
               }}
             >
-              {u}
+              {t(URGENCY_KEYS[u])}
             </button>
           ))}
         </div>
-      </div>
+      </fieldset>
 
       {/* Photo */}
       <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
-        <span className="hud-label" style={{ marginBottom: 6, display: 'block' }}>Photo</span>
-        <Button onClick={handlePhotoCapture} variant="outline" size="sm">
-          <Camera size={14} /> Capture Photo
+        <span className="hud-label" style={{ marginBottom: 6, display: 'block' }}>{t('create.photo')}</span>
+        <Button onClick={handleCapture} variant="outline" size="sm">
+          <Camera size={14} /> {t('create.capture')}
         </Button>
-        {photo && (
-          <div style={{ marginTop: 8 }}>
-            <img src={photo} alt="Captured" style={{ width: '100%', borderRadius: 2, maxHeight: 200, objectFit: 'cover' }} />
-            <button
-              onClick={() => setPhoto(null)}
-              style={{
-                marginTop: 4, background: 'none', border: 'none', color: 'var(--danger)',
-                fontSize: 10, fontFamily: 'var(--font-label)', textTransform: 'uppercase', cursor: 'pointer',
-              }}
-            >
-              Remove Photo
-            </button>
+        {images.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            {images.map((img, index) => (
+              <div key={img.preview} style={{ position: 'relative' }}>
+                <img
+                  src={img.preview}
+                  alt={t('create.capturedAlt', { n: index + 1 })}
+                  style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 2, border: '1px solid var(--border)' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(index)}
+                  aria-label={t('detail.removePhoto', { n: index + 1 })}
+                  style={{
+                    position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%',
+                    border: 'none', background: 'var(--danger)', color: '#fff', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Reporter info */}
+      {/* Reporter */}
       <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
-        <span className="hud-label" style={{ marginBottom: 6, display: 'block' }}>Reporter Info</span>
+        <span className="hud-label" style={{ marginBottom: 6, display: 'block' }}>{t('create.reporter')}</span>
+        <label htmlFor="reporter-name" className="sr-only">{t('create.reporterName')}</label>
         <input
+          id="reporter-name"
           value={reporterName}
           onChange={(e) => setReporterName(e.target.value)}
-          placeholder="Your name"
+          placeholder={t('create.reporterNamePh')}
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-            fontFamily: 'var(--font-body)', outline: 'none', marginBottom: 6,
+            fontFamily: 'var(--font-body)', marginBottom: 8,
           }}
         />
+        <label htmlFor="reporter-contact" className="sr-only">{t('create.reporterPhone')}</label>
         <input
+          id="reporter-contact"
           value={reporterContact}
           onChange={(e) => setReporterContact(e.target.value)}
-          placeholder="Phone number"
+          placeholder={t('create.reporterPhonePh')}
           style={{
             width: '100%', background: 'var(--bg-deep)', border: '1px solid var(--border)',
             borderRadius: 2, padding: '10px', color: 'var(--ink)', fontSize: 12,
-            fontFamily: 'var(--font-body)', outline: 'none',
+            fontFamily: 'var(--font-body)',
           }}
         />
       </div>
 
-      {/* Error */}
       {error && (
         <div className="glass-panel" style={{ padding: '10px', marginBottom: 12, borderColor: 'rgba(239,68,68,0.4)' }}>
-          <p style={{ color: 'var(--danger)', fontSize: 11 }}>{error}</p>
+          <p role="alert" style={{ color: 'var(--danger)', fontSize: 11 }}>{tm(error)}</p>
         </div>
       )}
 
-      {/* Submit */}
       <Button
         onClick={() => createMutation.mutate()}
         disabled={!canSubmit || createMutation.isPending}
@@ -273,7 +308,7 @@ export function CreateTicketPage() {
         className="w-full"
         style={{ width: '100%', marginBottom: 24 }}
       >
-        {createMutation.isPending ? 'Submitting...' : 'Submit Report'}
+        {createMutation.isPending ? t('create.submitting') : t('create.submit')}
       </Button>
     </div>
   );
