@@ -11,6 +11,7 @@
  * realm's UAT account (see docs/testing.md).
  */
 import { test, expect, type Page } from '@playwright/test';
+import { act, detail } from './support/uat-api';
 
 const USERNAME = process.env.E2E_USERNAME ?? 'ops_user';
 const PASSWORD = process.env.E2E_PASSWORD ?? 'ops123';
@@ -31,11 +32,12 @@ async function login(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: /sign in/i }).click();
 
-  // Keycloak's login form
-  await page.waitForSelector('#username', { timeout: 30_000 });
-  await page.fill('#username', USERNAME);
-  await page.fill('#password', PASSWORD);
-  await page.click('#kc-login');
+  // The PWA's password sign-in form
+  await page.waitForSelector('#login-username', { timeout: 30_000 });
+  await page.fill('#login-username', USERNAME);
+  await page.fill('#login-password', PASSWORD);
+  // The PWA's own password form (AUTH_MODE=password) submits through the BFF; no hosted Keycloak page.
+  await page.locator('form button[type="submit"]').click();
 
   // Back through /auth/callback to the app's ticket list. Wait for the app's own
 // origin — matching only on "not /auth/*" would be satisfied on Keycloak's page
@@ -111,11 +113,34 @@ async function createTicket(page: Page, title: string) {
 
   await page.fill('#incident-title', title);
   await page.fill('#incident-description', 'Automated end-to-end verification of the field app.');
+  // The report form offers only public incident types (INF6 on this stack).
+const PUBLIC_INCIDENT_TYPE = 'INF6';
+// Without a type the report is unclassified and has no workflow, so pick one (the same type the API suite uses).
+  await page.selectOption('#incident-type', PUBLIC_INCIDENT_TYPE);
   await lockGps(page);
 
   await page.getByRole('button', { name: /submit report/i }).click();
   await page.waitForURL(/\/tickets\/[^/]+$/, { timeout: 40_000 });
-  CREATED.push(new URL(page.url()).pathname.split('/').pop() as string);
+  const uid = new URL(page.url()).pathname.split('/').pop() as string;
+  CREATED.push(uid);
+  // A fresh report offers only dispatch steps, so the field update panel (GPS + comment) is absent.
+  // Dispatch it as admin and accept it as the engineer, the way a dispatcher hands work to the field.
+  await dispatchToEngineer(uid);
+  await page.reload(); // the detail screen was loaded before the dispatch; reload so the field actions show
+}
+
+/** Confirm + submit to dispatch (admin), then accept as the engineer, via the real action endpoints. */
+async function dispatchToEngineer(uid: string) {
+  let d = await detail('admin', uid);
+  for (const step of ['confirm', 'submit']) {
+    if (d.workflow_state === 'dispatch') break;
+    if (d.available_actions?.some((a) => a.action === step)) {
+      await act('admin', uid, step);
+      d = await detail('admin', uid);
+    }
+  }
+  if (d.workflow_state !== 'dispatch') throw new Error(`ticket ${uid} did not reach dispatch (state=${d.workflow_state})`);
+  await act('engineer', uid, 'accept');
 }
 
 test.describe('PWA shell', () => {
@@ -166,8 +191,8 @@ test.describe('Ticket journey', () => {
     await lockGps(page);
     const comment = `On site, pothole measured ${RUN_TAG}`;
     await page.fill('#update-comment', comment);
-    await page.selectOption('#update-status', 'IN_PROGRESS');
-    await page.getByRole('button', { name: /save update/i }).click();
+    // The update is a field action: 'start' moves an accepted ticket to IN_PROGRESS (ticket-action-start).
+    await page.getByTestId('ticket-action-start').click();
 
     // The activity timeline must show the comment without a manual reload.
     await expect(page.getByText(comment)).toBeVisible({ timeout: 40_000 });
@@ -214,8 +239,8 @@ test.describe('Ticket journey', () => {
     const thumb = page.locator('img[src*="/api/uploads/"], img[src*="blob:"]').first();
     await expect(thumb).toBeVisible({ timeout: 30_000 });
 
-    await page.selectOption('#update-status', 'IN_PROGRESS');
-    await page.getByRole('button', { name: /save update/i }).click();
+    // The update is a field action: 'start' moves an accepted ticket to IN_PROGRESS (ticket-action-start).
+    await page.getByTestId('ticket-action-start').click();
     await expect(page.getByText(`Photo attached ${RUN_TAG}`)).toBeVisible({ timeout: 40_000 });
 
     // Re-open the ticket, as a returning officer would: the stored evidence must
@@ -266,10 +291,10 @@ test.describe('Offline behaviour', () => {
     await login(page);
 
     await context.setOffline(true);
-    await expect(page.getByText(/offline/i).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/offline — updates will sync/i).first()).toBeVisible({ timeout: 20_000 });
 
     await context.setOffline(false);
-    await expect(page.getByText(/offline/i).first()).toBeHidden({ timeout: 20_000 });
+    await expect(page.getByText(/offline — updates will sync/i).first()).toBeHidden({ timeout: 20_000 });
   });
 
   test('an update written offline is queued, then sent when the connection returns', async ({
@@ -289,10 +314,10 @@ test.describe('Offline behaviour', () => {
     await lockGps(page);
     const comment = `Written with no signal ${RUN_TAG}`;
     await page.fill('#update-comment', comment);
-    await page.selectOption('#update-status', 'IN_PROGRESS');
+    // The update is a field action: 'start' moves an accepted ticket to IN_PROGRESS.
 
     await context.setOffline(true);
-    await page.getByRole('button', { name: /save update/i }).click();
+    await page.getByTestId('ticket-action-start').click();
 
     // The officer is told their work is safe.
     await expect(page.getByText(/saved on this device/i)).toBeVisible({ timeout: 20_000 });
