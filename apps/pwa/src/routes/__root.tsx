@@ -18,7 +18,8 @@ const NAV_ITEM_STYLE = {
 
 const NAV_LABEL_STYLE = {
   fontFamily: 'var(--font-label)',
-  fontSize: '9px',
+  fontSize: '12px',
+  whiteSpace: 'nowrap' as const,
   textTransform: 'uppercase' as const,
   letterSpacing: '0.1em',
 };
