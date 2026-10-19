@@ -1,12 +1,12 @@
 import { Outlet, Link, useLocation } from '@tanstack/react-router';
-import { List, Clock, Plus, LogOut } from 'lucide-react';
+import { List, Clock, Plus } from 'lucide-react';
 import { logout, getSessionUser } from '../lib/auth';
 import { canCreateTickets } from '../lib/permissions';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useOfflineSync } from '../hooks/useOfflineSync';
 import { authNotice, syncNotice, otherUserNotice, photoDroppedNotice, lockedNotice, logoutWarning } from '../lib/offline-queue';
 import { useLang } from '../i18n/react';
-import { LanguageToggle } from '../i18n/LanguageToggle';
+import { AppHeader } from './app-header';
 
 const NAV_ITEM_STYLE = {
   display: 'flex',
@@ -18,7 +18,8 @@ const NAV_ITEM_STYLE = {
 
 const NAV_LABEL_STYLE = {
   fontFamily: 'var(--font-label)',
-  fontSize: '9px',
+  fontSize: '12px',
+  whiteSpace: 'nowrap' as const,
   textTransform: 'uppercase' as const,
   letterSpacing: '0.1em',
 };
@@ -50,39 +51,7 @@ export function RootLayout() {
   return (
     <div className="app-shell" style={{ background: 'var(--bg-deep)' }}>
       {!isLogin && (
-        <header
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            gap: 12, padding: '10px 16px', background: 'var(--glass)',
-            borderBottom: '1px solid var(--border)', backdropFilter: 'blur(24px)',
-          }}
-        >
-          <span
-            style={{
-              fontFamily: 'var(--font-label)', fontSize: 12, letterSpacing: '0.16em',
-              textTransform: 'uppercase', color: 'var(--ink-dim)',
-            }}
-          >
-            {t('app.header')}
-          </span>
-          {/* A field officer hands the handset over at the end of a shift; without
-              this the session (and the cached screens) stayed on the device. */}
-          <LanguageToggle />
-          <button
-            type="button"
-            onClick={signOut}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
-              background: 'transparent', border: '1px solid var(--border)',
-              borderRadius: 2, color: 'var(--ink-dim)', cursor: 'pointer',
-              fontFamily: 'var(--font-label)', fontSize: 12,
-              letterSpacing: '0.1em', textTransform: 'uppercase',
-            }}
-          >
-            <LogOut size={14} aria-hidden="true" />
-            {t('app.signOut')}
-          </button>
-        </header>
+        <AppHeader onSignOut={signOut} />
       )}
       <main className="app-content">
         {!isLogin && signInNotice && (

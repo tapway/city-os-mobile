@@ -13,7 +13,6 @@ import {
   runEvidenceAction,
   deleteImage,
   uploadImage,
-  storageUrl,
   type TicketDetail,
 } from '../lib/help-api';
 import { getActor, getSessionUser } from '../lib/auth';
@@ -25,6 +24,7 @@ import { actionButtons, missingRequirements, buildActionUpdate, staleConflictMes
 import { MAX_NOTE_LENGTH, MAX_EVIDENCE_PHOTOS } from '../lib/help-api';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
+import { EvidenceImage } from './evidence-image';
 import { useLang } from '../i18n/react';
 import { statusLabel, stateLabel, eventLabel, anyStateLabel, sourceLabel } from '../i18n/labels';
 import { formatDateTime } from '../i18n/format';
@@ -360,13 +360,7 @@ export function TicketDetailPage() {
           <span className="hud-label" style={{ display: 'block', marginBottom: 8 }}>{t('detail.attachedImages')}</span>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {detail.image_urls.map((url) => (
-              <a key={url} href={storageUrl(url)} target="_blank" rel="noreferrer">
-                <img
-                  src={storageUrl(url)}
-                  alt={t('detail.evidenceAlt')}
-                  style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 2, border: '1px solid var(--border)' }}
-                />
-              </a>
+              <EvidenceImage key={url} url={url} />
             ))}
           </div>
         </div>

@@ -15,7 +15,7 @@ export function LanguageToggle() {
         aria-label={t(l === 'en' ? 'lang.switchToEn' : 'lang.switchToMs')}
         onClick={() => setLang(l)}
         style={{
-          padding: '5px 8px', fontSize: 12, fontFamily: 'var(--font-label)', letterSpacing: '0.08em',
+          padding: '0 8px', minHeight: 44, minWidth: 44, fontSize: 12, fontFamily: 'var(--font-label)', letterSpacing: '0.08em',
           cursor: 'pointer', background: active ? 'rgba(61,232,255,0.12)' : 'transparent',
           color: active ? 'var(--cyan)' : 'var(--ink-dim)',
           border: `1px solid ${active ? 'var(--cyan)' : 'var(--border)'}`,

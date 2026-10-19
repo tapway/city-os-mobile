@@ -27,7 +27,7 @@ describe('readability floor (Impeccable audit, 19 Oct)', () => {
     const files = readdirSync(resolve(src, 'routes')).filter((f) => f.endsWith('.tsx'))
       .map((f) => resolve(src, 'routes', f)).concat(resolve(src, 'i18n/LanguageToggle.tsx'));
     const tiny = files.flatMap((f) =>
-      [...readFileSync(f, 'utf8').matchAll(/fontSize:\s*(\d+)\b/g)].filter((m) => Number(m[1]) < 12).map((m) => `${f}: ${m[0]}`));
+      [...readFileSync(f, 'utf8').matchAll(/fontSize:\s*['"]?(\d+(?:\.\d+)?)(?:px)?\b/g)].filter((m) => Number(m[1]) < 12).map((m) => `${f}: ${m[0]}`));
     expect(tiny).toEqual([]);
     for (const m of css.matchAll(/font-size:\s*(\d+)px/g)) expect(Number(m[1])).toBeGreaterThanOrEqual(12);
   });
