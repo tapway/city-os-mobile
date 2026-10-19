@@ -117,6 +117,7 @@ export const ms: Record<MessageKey, string> = {
   'detail.attachedImages': 'Imej dilampirkan',
   'detail.evidenceAlt': 'Bukti tiket',
   'detail.photoUnavailable': 'Foto tidak tersedia',
+  'detail.photoRetry': 'Ketik untuk cuba lagi',
   'detail.updateTitle': 'Kemas kini tiket',
   'detail.gpsNone': 'Belum ada kedudukan GPS',
   'detail.gpsLocating': 'Mencari lokasi…',

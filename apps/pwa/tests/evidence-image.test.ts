@@ -29,45 +29,64 @@ describe('evidenceSource: which images need the signed-in fetch', () => {
 });
 
 describe('loadEvidenceImage', () => {
-  it('fetches the object with the signed-in client and returns an object URL', async () => {
-    const fetcher = vi.fn(async () => imageResponse());
-    const createObjectURL = vi.fn(() => 'blob:abc');
-    const url = await loadEvidenceImage(JIRA_URL, { fetcher, createObjectURL });
-    expect(fetcher).toHaveBeenCalledWith(JIRA_URL);
-    expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(url).toBe('blob:abc');
+  const mkDeps = (fetcher: (path: string, signal?: AbortSignal) => Promise<Response>, createObjectURL = vi.fn(() => 'blob:abc')) => ({
+    fetcher, createObjectURL, revokeObjectURL: vi.fn(),
   });
 
-  it('is null (not an exception) when the server refuses or the object is gone', async () => {
-    for (const status of [401, 403, 404, 503]) {
-      const fetcher = vi.fn(async () => {
-        throw new ApiError(status, 'nope');
-      });
-      const createObjectURL = vi.fn(() => 'blob:abc');
-      expect(await loadEvidenceImage(JIRA_URL, { fetcher, createObjectURL }), String(status)).toBeNull();
-      expect(createObjectURL).not.toHaveBeenCalled();
+  it('fetches the object with the signed-in client and returns an object URL', async () => {
+    const fetcher = vi.fn(async () => imageResponse());
+    const deps = mkDeps(fetcher);
+    const r = await loadEvidenceImage(JIRA_URL, deps);
+    expect(fetcher).toHaveBeenCalledWith(JIRA_URL, expect.any(AbortSignal));
+    expect(deps.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({ status: 'ready', src: 'blob:abc' });
+  });
+
+  it('403 and 404 are "not available" and not worth retrying automatically', async () => {
+    for (const status of [403, 404]) {
+      const deps = mkDeps(async () => { throw new ApiError(status, 'nope'); });
+      expect(await loadEvidenceImage(JIRA_URL, deps), String(status)).toEqual({ status: 'unavailable', retryable: false });
+      expect(deps.createObjectURL).not.toHaveBeenCalled();
     }
   });
 
-  it('is null when the device is offline', async () => {
-    const fetcher = vi.fn(async () => {
-      throw new ApiError(0, 'offline');
-    });
-    expect(await loadEvidenceImage(JIRA_URL, { fetcher, createObjectURL: () => 'blob:x' })).toBeNull();
+  it('401, 5xx and offline are transient: retryable', async () => {
+    for (const status of [401, 500, 503, 0]) {
+      const deps = mkDeps(async () => { throw new ApiError(status, 'nope'); });
+      expect(await loadEvidenceImage(JIRA_URL, deps), String(status)).toEqual({ status: 'unavailable', retryable: true });
+    }
   });
 
-  it('is null when the answer is not an image (an error page must not become a picture)', async () => {
-    const fetcher = vi.fn(async () => imageResponse('text/html'));
-    const createObjectURL = vi.fn(() => 'blob:abc');
-    expect(await loadEvidenceImage(JIRA_URL, { fetcher, createObjectURL })).toBeNull();
-    expect(createObjectURL).not.toHaveBeenCalled();
+  it('a request that hangs turns into a retryable failure after 15 s', async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted = false;
+      const deps = mkDeps((_p, signal) => new Promise<Response>(() => { signal?.addEventListener('abort', () => { aborted = true; }); }));
+      const pending = loadEvidenceImage(JIRA_URL, deps);
+      await vi.advanceTimersByTimeAsync(14_999);
+      let settled = false;
+      void pending.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await pending).toEqual({ status: 'unavailable', retryable: true });
+      expect(aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an answer that is not an image is unavailable (an error page must not become a picture)', async () => {
+    const deps = mkDeps(async () => imageResponse('text/html'));
+    expect(await loadEvidenceImage(JIRA_URL, deps)).toEqual({ status: 'unavailable', retryable: false });
+    expect(deps.createObjectURL).not.toHaveBeenCalled();
   });
 });
 
 describe('EvidenceThumbView', () => {
   const t = (key: keyof typeof en) => en[key];
   const view = (state: Parameters<typeof EvidenceThumbView>[0]['state']) =>
-    renderToStaticMarkup(createElement(EvidenceThumbView, { state, alt: en['detail.evidenceAlt'], unavailable: en['detail.photoUnavailable'] }));
+    renderToStaticMarkup(createElement(EvidenceThumbView, { state, alt: en['detail.evidenceAlt'], unavailable: en['detail.photoUnavailable'], retry: en['detail.photoRetry'], onRetry: () => {} }));
 
   it('ready: a linked image carrying the alt text', () => {
     const html = view({ status: 'ready', src: 'blob:abc' });
@@ -78,11 +97,14 @@ describe('EvidenceThumbView', () => {
   });
 
   it('unavailable: a labelled placeholder, no <img> and no dead link', () => {
-    const html = view({ status: 'unavailable' });
+    const html = view({ status: 'unavailable', retryable: true });
     expect(html).not.toContain('<img');
     expect(html).not.toContain('<a ');
     expect(html).toContain('Photo not available');
     expect(html).toContain('data-testid="evidence-unavailable"');
+    // tap to retry, as a real button
+    expect(html).toMatch(/<button type="button"[^>]*data-testid="evidence-unavailable"/);
+    expect(html).toContain('Tap to retry');
   });
 
   it('loading: no broken image while the photo downloads', () => {
@@ -97,6 +119,9 @@ describe('photo-unavailable text', () => {
     expect(en['detail.photoUnavailable']).toBe('Photo not available');
     expect(ms['detail.photoUnavailable']).toBeTruthy();
     expect(ms['detail.photoUnavailable']).not.toBe(en['detail.photoUnavailable']);
+    expect(en['detail.photoRetry']).toBe('Tap to retry');
+    expect(ms['detail.photoRetry']).toBeTruthy();
+    expect(ms['detail.photoRetry']).not.toBe(en['detail.photoRetry']);
   });
 });
 

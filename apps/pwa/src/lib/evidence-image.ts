@@ -9,7 +9,7 @@
  *
  * Kept free of React so the rules can be unit-tested in node.
  */
-import { apiFetch } from './api';
+import { ApiError, apiFetch } from './api';
 import { storageUrl } from './help-api';
 
 export type EvidenceSource = 'authenticated' | 'direct';
@@ -29,30 +29,65 @@ export function evidenceSource(imageUrl: string): EvidenceSource {
 
 export interface EvidenceImageDeps {
   /** Signed-in GET; throws on a non-2xx answer or when offline. */
-  fetcher: (path: string) => Promise<Response>;
+  fetcher: (path: string, signal?: AbortSignal) => Promise<Response>;
   createObjectURL: (blob: Blob) => string;
+  revokeObjectURL: (url: string) => void;
+  /** How long a download may take before it counts as failed. */
+  timeoutMs?: number;
 }
 
-const defaultDeps = (): EvidenceImageDeps => ({
-  fetcher: (path) => apiFetch(path),
+/** A hung request must end in the placeholder, not a forever-grey box. */
+export const EVIDENCE_TIMEOUT_MS = 15_000;
+
+export const defaultEvidenceDeps: EvidenceImageDeps = {
+  fetcher: (path, signal) => apiFetch(path, { signal }),
   createObjectURL: (blob) => URL.createObjectURL(blob),
-});
+  revokeObjectURL: (url) => URL.revokeObjectURL(url),
+  timeoutMs: EVIDENCE_TIMEOUT_MS,
+};
+
+export type EvidenceLoad =
+  | { status: 'ready'; src: string }
+  /** `retryable`: worth trying again by itself when the network returns (not 403/404/non-image). */
+  | { status: 'unavailable'; retryable: boolean };
+
+const TIMED_OUT = Symbol('timed out');
 
 /**
- * Download an authenticated photo and return an object URL for it, or null when
- * it cannot be shown (refused, deleted, storage down, offline, or not an image).
- * The caller owns the returned URL and must revoke it.
+ * Download an authenticated photo and return an object URL for it, or why it
+ * cannot be shown. The caller owns the returned URL and must revoke it.
+ *
+ * 403 and 404 (refused, deleted) and a non-image answer will not fix
+ * themselves; offline, 401, 5xx and a timeout might, so they are retryable.
  */
 export async function loadEvidenceImage(
   imageUrl: string,
-  deps: EvidenceImageDeps = defaultDeps(),
-): Promise<string | null> {
+  deps: EvidenceImageDeps = defaultEvidenceDeps,
+): Promise<EvidenceLoad> {
+  const ctl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => {
+      ctl.abort();
+      resolve(TIMED_OUT);
+    }, deps.timeoutMs ?? EVIDENCE_TIMEOUT_MS);
+  });
+  const download = (async () => {
+    const resp = await deps.fetcher(storageUrl(imageUrl), ctl.signal);
+    return resp.blob();
+  })();
+  download.catch(() => {}); // a loser of the race must not surface as an unhandled rejection
   try {
-    const resp = await deps.fetcher(storageUrl(imageUrl));
-    const blob = await resp.blob();
-    if (blob.type && !blob.type.startsWith('image/') && blob.type !== 'application/octet-stream') return null;
-    return deps.createObjectURL(blob);
-  } catch {
-    return null;
+    const blob = await Promise.race([download, timeout]);
+    if (blob === TIMED_OUT) return { status: 'unavailable', retryable: true };
+    if (blob.type && !blob.type.startsWith('image/') && blob.type !== 'application/octet-stream') {
+      return { status: 'unavailable', retryable: false };
+    }
+    return { status: 'ready', src: deps.createObjectURL(blob) };
+  } catch (err) {
+    const gone = err instanceof ApiError && (err.status === 403 || err.status === 404);
+    return { status: 'unavailable', retryable: !gone };
+  } finally {
+    clearTimeout(timer);
   }
 }

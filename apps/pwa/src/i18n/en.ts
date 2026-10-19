@@ -124,6 +124,7 @@ export const en = {
   'detail.attachedImages': 'Attached images',
   'detail.evidenceAlt': 'Ticket evidence',
   'detail.photoUnavailable': 'Photo not available',
+  'detail.photoRetry': 'Tap to retry',
   'detail.updateTitle': 'Update ticket',
   'detail.gpsNone': 'No GPS fix yet',
   'detail.gpsLocating': 'Locating…',
