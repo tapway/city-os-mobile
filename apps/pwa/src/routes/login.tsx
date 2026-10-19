@@ -67,7 +67,7 @@ export function LoginBody({
         <h1 className="hud-title" style={{ fontSize: 18, marginBottom: 8 }}>CITY HELP</h1>
         <div
           style={{
-            fontFamily: 'var(--font-display)', fontSize: 10, color: 'var(--ink-dim)',
+            fontFamily: 'var(--font-display)', fontSize: 12, color: 'var(--ink-dim)',
             marginBottom: 24, letterSpacing: '0.1em', textTransform: 'uppercase',
           }}
         >

@@ -59,7 +59,7 @@ export function RootLayout() {
         >
           <span
             style={{
-              fontFamily: 'var(--font-label)', fontSize: 10, letterSpacing: '0.16em',
+              fontFamily: 'var(--font-label)', fontSize: 12, letterSpacing: '0.16em',
               textTransform: 'uppercase', color: 'var(--ink-dim)',
             }}
           >
@@ -75,7 +75,7 @@ export function RootLayout() {
               display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
               background: 'transparent', border: '1px solid var(--border)',
               borderRadius: 2, color: 'var(--ink-dim)', cursor: 'pointer',
-              fontFamily: 'var(--font-label)', fontSize: 10,
+              fontFamily: 'var(--font-label)', fontSize: 12,
               letterSpacing: '0.1em', textTransform: 'uppercase',
             }}
           >
@@ -151,7 +151,7 @@ export function RootLayout() {
               background: online ? 'rgba(61,232,255,0.08)' : 'rgba(239,68,68,0.12)',
               borderBottom: '1px solid var(--border)',
               fontFamily: 'var(--font-label)',
-              fontSize: 10,
+              fontSize: 12,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
               color: online ? 'var(--cyan)' : 'var(--danger)',
@@ -173,7 +173,7 @@ export function RootLayout() {
                 style={{
                   padding: '4px 10px', background: 'transparent', border: '1px solid var(--cyan)',
                   borderRadius: 2, color: 'var(--cyan)', cursor: 'pointer', fontFamily: 'var(--font-label)',
-                  fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  fontSize: 12, letterSpacing: '0.06em', textTransform: 'uppercase',
                 }}
               >
                 {t('offline.sendNow')}
