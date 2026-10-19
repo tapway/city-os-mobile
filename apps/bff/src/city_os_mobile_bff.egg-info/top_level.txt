@@ -1,4 +1,0 @@
-auth
-main
-proxy
-settings
