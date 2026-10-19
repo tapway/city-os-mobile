@@ -24,8 +24,8 @@
 
   /* Text */
   --ink: #e2e8f0;
-  --ink-dim: #64748b;
-  --ink-faint: #475569;
+  --ink-dim: #94a3b8;
+  --ink-faint: #7c8aa0;
 
   /* Accents */
   --cyan: #3de8ff;
@@ -143,7 +143,7 @@ body::before {
 /* HUD labels */
 .hud-label {
   font-family: var(--font-label);
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--ink-dim);
@@ -161,7 +161,7 @@ body::before {
 /* Button base (for custom buttons outside @city-os/ui) */
 .hud-btn {
   font-family: var(--font-label);
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   cursor: pointer;
@@ -179,6 +179,25 @@ body::before {
 .hud-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* Status filter chips: one scrolling row. The right edge fades out so a
+   clipped chip reads as "more this way", not as a broken label. */
+.chip-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+.chip-row::-webkit-scrollbar {
+  display: none;
+}
+.chip-row > :last-child {
+  margin-right: 24px;
 }
 
 /* Scrollbar styling */

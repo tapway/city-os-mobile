@@ -50,6 +50,14 @@ export function TicketsPage() {
   const probing = chosenFilter === null && resolved.probing;
   const activeId = chosenFilter ?? resolved.view;
   const activeFilter = FILTERS.find((f) => f.id === activeId) ?? FILTERS[0]!;
+  const chipRowRef = useRef<HTMLDivElement>(null);
+  // The row scrolls sideways; keep the chosen chip visible (a default like
+  // "In progress" may start off-screen on a narrow phone).
+  useEffect(() => {
+    chipRowRef.current
+      ?.querySelector<HTMLElement>('[aria-pressed="true"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [activeFilter.id]);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -90,7 +98,7 @@ export function TicketsPage() {
           style={{
             display: 'flex', alignItems: 'center', gap: 6, background: 'transparent',
             border: '1px solid var(--border)', color: 'var(--cyan)', borderRadius: 2,
-            padding: '6px 10px', fontSize: 10, fontFamily: 'var(--font-label)',
+            padding: '6px 10px', fontSize: 12, fontFamily: 'var(--font-label)',
             textTransform: 'uppercase', letterSpacing: '0.08em', cursor: 'pointer',
           }}
         >
@@ -98,7 +106,7 @@ export function TicketsPage() {
           {isFetching ? t('tickets.loading') : t('tickets.refresh')}
         </button>
       </div>
-      <div style={{ fontSize: 10, color: 'var(--ink-dim)', fontFamily: 'var(--font-label)', marginTop: 4 }}>
+      <div style={{ fontSize: 12, color: 'var(--ink-dim)', fontFamily: 'var(--font-label)', marginTop: 4 }}>
         {isLoading ? t('tickets.loading') : t('tickets.count', { shown: tickets.length, total })}
       </div>
     </div>
@@ -114,7 +122,7 @@ export function TicketsPage() {
           className="glass-panel"
           style={{ padding: '8px 12px', marginBottom: 12, borderColor: 'rgba(239,68,68,0.4)' }}
         >
-          <p style={{ color: 'var(--danger)', fontSize: 11 }}>
+          <p style={{ color: 'var(--danger)', fontSize: 12 }}>
             {t('offline.listNotice')}
           </p>
         </div>
@@ -158,7 +166,8 @@ export function TicketsPage() {
       <div
         role="group"
         aria-label={t('tickets.filterAria')}
-        style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 4 }}
+        className="chip-row"
+        ref={chipRowRef}
       >
         {FILTERS.map((f) => (
           <button
@@ -168,7 +177,7 @@ export function TicketsPage() {
             data-testid={filterTestId(f)}
             aria-pressed={f.id === activeFilter.id}
             style={{
-              flexShrink: 0, padding: '6px 12px', fontSize: 10, fontFamily: 'var(--font-label)',
+              flexShrink: 0, minHeight: 44, padding: '0 14px', fontSize: 12, fontFamily: 'var(--font-label)',
               textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', borderRadius: 2,
               border: `1px solid ${f.id === activeFilter.id ? 'var(--cyan)' : 'var(--border)'}`,
               background: f.id === activeFilter.id ? 'rgba(61,232,255,0.1)' : 'transparent',
@@ -199,7 +208,7 @@ export function TicketsPage() {
             type="button"
             onClick={() => refetch()}
             style={{
-              padding: '8px 14px', fontSize: 11, fontFamily: 'var(--font-label)',
+              padding: '8px 14px', fontSize: 12, fontFamily: 'var(--font-label)',
               textTransform: 'uppercase', letterSpacing: '0.06em', cursor: 'pointer',
               border: '1px solid var(--cyan)', color: 'var(--cyan)', background: 'transparent', borderRadius: 2,
             }}
@@ -250,7 +259,7 @@ export function TicketsPage() {
                     {statusLabel(ticket.status, lang)}
                   </Badge>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 11, color: 'var(--ink-faint)' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: 'var(--ink-faint)' }}>
                   <span style={{ fontFamily: 'var(--font-label)', color: 'var(--cyan)' }}>
                     {ticket.ticket_uid}
                   </span>

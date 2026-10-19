@@ -18,7 +18,7 @@ const fieldStyle = {
   borderRadius: 4,
 } as const;
 
-const labelStyle = { display: 'block', fontSize: 11, textAlign: 'left', marginBottom: 4 } as const;
+const labelStyle = { display: 'block', fontSize: 12, textAlign: 'left', marginBottom: 4 } as const;
 
 /** Presentational: the markup for the form, driven entirely by props. */
 export function PasswordLoginFields({

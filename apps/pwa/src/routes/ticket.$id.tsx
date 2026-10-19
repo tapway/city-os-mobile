@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, MapPin, Clock, AlertTriangle, MessageSquare, Camera, X, Lock } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, AlertTriangle, MessageSquare, Camera, X, Lock, AlertCircle } from 'lucide-react';
 import { Button, Badge } from '@city-os/ui';
 import {
   getTicket,
@@ -21,7 +21,7 @@ import { enqueueMutation, hasQueuedForTicket } from '../lib/offline-queue';
 import { submitStatusUpdate } from '../lib/submit-update';
 import { submitEvidence } from '../lib/submit-evidence';
 import { isTicketLocked } from '../lib/api';
-import { actionButtons, buildActionUpdate, staleConflictMessage, clampNote, noteCounter, type FieldAction } from '../lib/ticket-actions';
+import { actionButtons, missingRequirements, buildActionUpdate, staleConflictMessage, clampNote, noteCounter, type FieldAction } from '../lib/ticket-actions';
 import { MAX_NOTE_LENGTH, MAX_EVIDENCE_PHOTOS } from '../lib/help-api';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useGeolocation, formatFixAge } from '../hooks/useGeolocation';
@@ -226,7 +226,7 @@ export function TicketDetailPage() {
           style={{
             display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, background: 'none',
             border: 'none', color: 'var(--cyan)', cursor: 'pointer', fontFamily: 'var(--font-label)',
-            fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em',
+            fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em',
           }}
         >
           <ArrowLeft size={16} /> {t('detail.back')}
@@ -244,6 +244,13 @@ export function TicketDetailPage() {
   const locked = detail.is_locked === true;
   // A locked ticket accepts no field updates (the server would 409 every one).
   const buttons = locked ? [] : actionButtons(detail.available_actions);
+  const deviceState = { online, gpsFresh: geo.isFresh, photos: images.length };
+  const blockedReasons = buttons.flatMap((b) => {
+    const missing = missingRequirements(b, deviceState);
+    if (missing.length === 0) return [];
+    const items = missing.map((k) => t(k)).join(t('detail.req.and'));
+    return [{ action: b.action, text: t('detail.blockedBy', { action: t(b.labelKey), items }) }];
+  });
   const gpsLabel = geo.fix
     ? `${geo.fix.lat.toFixed(6)}, ${geo.fix.lng.toFixed(6)}${geo.accuracy ? ` (±${Math.round(geo.accuracy)} m)` : ''} · ${formatFixAge(geo.ageMs)}`
     : t('detail.gpsNone');
@@ -256,7 +263,7 @@ export function TicketDetailPage() {
         style={{
           display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, background: 'none',
           border: 'none', color: 'var(--cyan)', cursor: 'pointer', fontFamily: 'var(--font-label)',
-          fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em',
+          fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em',
         }}
       >
         <ArrowLeft size={16} /> {t('detail.back')}
@@ -272,13 +279,13 @@ export function TicketDetailPage() {
             {statusLabel(detail.status ?? '', lang)}
           </Badge>
         </div>
-        <p style={{ fontFamily: 'var(--font-label)', fontSize: 10, color: 'var(--cyan)', marginBottom: 8 }}>
+        <p style={{ fontFamily: 'var(--font-label)', fontSize: 12, color: 'var(--cyan)', marginBottom: 8 }}>
           {detail.ticket_uid}
         </p>
         {detail.description && (
           <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>{detail.description}</p>
         )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, fontSize: 10, color: 'var(--ink-faint)', fontFamily: 'var(--font-label)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, fontSize: 12, color: 'var(--ink-faint)', fontFamily: 'var(--font-label)' }}>
           {detail.workflow_state && <span>{t('detail.stage', { value: stateLabel(detail.workflow_state, lang) })}</span>}
           {detail.source && <span>{t('detail.source', { value: sourceLabel(detail.source, lang) })}</span>}
           {detail.assigned_to && <span>{t('detail.assigned', { value: detail.assigned_to })}</span>}
@@ -314,7 +321,7 @@ export function TicketDetailPage() {
               <Clock size={15} style={{ color: 'var(--cyan)' }} />
             )}
             <span className="hud-label">{t('detail.sla')}</span>
-            <span style={{ fontSize: 11, color: detail.sla_breached ? 'var(--danger)' : 'var(--ink-dim)', marginLeft: 'auto' }}>
+            <span style={{ fontSize: 12, color: detail.sla_breached ? 'var(--danger)' : 'var(--ink-dim)', marginLeft: 'auto' }}>
               {t(detail.sla_breached ? 'detail.slaBreached' : 'detail.slaDue', { when: formatDateTime(detail.sla_deadline, lang) || '—' })}
             </span>
           </div>
@@ -336,7 +343,7 @@ export function TicketDetailPage() {
             target="_blank"
             rel="noreferrer"
             style={{
-              display: 'inline-block', marginTop: 8, padding: '6px 12px', fontSize: 10,
+              display: 'inline-block', marginTop: 8, padding: '6px 12px', fontSize: 12,
               fontFamily: 'var(--font-label)', textTransform: 'uppercase', letterSpacing: '0.05em',
               border: '1px solid var(--border)', color: 'var(--cyan)', background: 'transparent',
               borderRadius: 2, textDecoration: 'none',
@@ -379,7 +386,7 @@ export function TicketDetailPage() {
             }}
           >
             <MapPin size={14} style={{ color: geo.isFresh ? 'var(--cyan)' : 'var(--ink-dim)' }} />
-            <span style={{ fontSize: 11, color: geo.isFresh ? 'var(--ink)' : 'var(--ink-dim)', flex: 1 }}>
+            <span style={{ fontSize: 12, color: geo.isFresh ? 'var(--ink)' : 'var(--ink-dim)', flex: 1 }}>
               {gpsLabel}
             </span>
             <Button data-testid="ticket-gps-get" onClick={() => geo.getPosition()} variant="outline" size="md" disabled={geo.loading}>
@@ -387,10 +394,10 @@ export function TicketDetailPage() {
             </Button>
           </div>
           {geo.error && (
-            <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginBottom: 8 }}>{tm(geo.error)}</p>
+            <p role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 8 }}>{tm(geo.error)}</p>
           )}
           {!geo.isFresh && !geo.error && (
-            <p style={{ color: 'var(--ink-faint)', fontSize: 11, marginBottom: 8 }}>
+            <p style={{ color: 'var(--ink-faint)', fontSize: 12, marginBottom: 8 }}>
               {t('detail.gpsHint')}
             </p>
           )}
@@ -415,7 +422,7 @@ export function TicketDetailPage() {
           <div
             id="update-comment-counter"
             data-testid="comment-counter"
-            style={{ textAlign: 'right', fontSize: 10, marginBottom: 10, color: comment.length >= MAX_NOTE_LENGTH ? 'var(--danger)' : 'var(--ink-faint)' }}
+            style={{ textAlign: 'right', fontSize: 12, marginBottom: 10, color: comment.length >= MAX_NOTE_LENGTH ? 'var(--danger)' : 'var(--ink-faint)' }}
           >
             {noteCounter(comment)}
           </div>
@@ -425,7 +432,7 @@ export function TicketDetailPage() {
             <Button data-testid="ticket-add-photo" onClick={handleCapture} variant="outline" size="md" disabled={images.length >= MAX_EVIDENCE_PHOTOS}>
               <Camera size={14} /> {t('detail.addPhoto')}
             </Button>
-            <span style={{ fontSize: 10, color: 'var(--ink-faint)' }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-faint)' }}>
               {images.length >= MAX_EVIDENCE_PHOTOS
                 ? t('detail.photoLimit', { max: MAX_EVIDENCE_PHOTOS })
                 : images.length > 0 ? t('detail.photosAttached', { count: images.length }) : t('detail.photosOptional')}
@@ -458,17 +465,16 @@ export function TicketDetailPage() {
           )}
 
           {formError && (
-            <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginBottom: 8 }}>{tm(formError)}</p>
+            <p role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 8 }}>{tm(formError)}</p>
           )}
           {notice && (
-            <p role="status" style={{ color: 'var(--safe, #34d399)', fontSize: 11, marginBottom: 8 }}>{tm(notice)}</p>
+            <p role="status" style={{ color: 'var(--safe, #34d399)', fontSize: 12, marginBottom: 8 }}>{tm(notice)}</p>
           )}
 
           {/* Actions offered by the server for this ticket */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {buttons.map((b) => {
-              const blocked =
-                (b.needsOnline && !online) || (b.needsGps && !geo.isFresh) || (b.needsPhoto && images.length === 0);
+              const blocked = missingRequirements(b, deviceState).length > 0;
               return (
                 <Button
                   key={b.action}
@@ -484,8 +490,16 @@ export function TicketDetailPage() {
               );
             })}
           </div>
-          {buttons.some((b) => b.needsOnline) && !online && (
-            <p style={{ color: 'var(--ink-faint)', fontSize: 11, marginTop: 8 }}>{t('detail.needSupportOffline')}</p>
+          {/* Say why a button is disabled instead of leaving the officer to guess. */}
+          {blockedReasons.length > 0 && (
+            <ul data-testid="ticket-blocked-reasons" style={{ listStyle: 'none', margin: '10px 0 0', padding: 0 }}>
+              {blockedReasons.map((r) => (
+                <li key={r.action} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', color: 'var(--warn)', fontSize: 12, lineHeight: 1.4, marginTop: 4 }}>
+                  <AlertCircle size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{r.text}</span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}
@@ -495,7 +509,7 @@ export function TicketDetailPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           <MessageSquare size={15} style={{ color: 'var(--cyan)' }} />
           <span className="hud-label">{t('detail.activity')}</span>
-          <span style={{ fontSize: 10, color: 'var(--ink-faint)', marginLeft: 'auto' }}>
+          <span style={{ fontSize: 12, color: 'var(--ink-faint)', marginLeft: 'auto' }}>
             {t('detail.entries', { count: timeline?.length ?? 0 })}
           </span>
         </div>
@@ -506,14 +520,14 @@ export function TicketDetailPage() {
             {timeline.map((event) => (
               <li key={event.id} style={{ borderLeft: '2px solid var(--border)', paddingLeft: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ fontSize: 11, color: 'var(--ink)', fontWeight: 600 }}>
+                  <span style={{ fontSize: 12, color: 'var(--ink)', fontWeight: 600 }}>
                     {eventLabel(event.event_type, lang)}
                   </span>
-                  <span style={{ fontSize: 10, color: 'var(--ink-faint)', flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, color: 'var(--ink-faint)', flexShrink: 0 }}>
                     {formatDateTime(event.created_at, lang) || '—'}
                   </span>
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--ink-dim)', marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 2 }}>
                   {event.actor || t('detail.system')}
                   {event.old_status && event.new_status ? ` · ${anyStateLabel(event.old_status, lang)} → ${anyStateLabel(event.new_status, lang)}` : ''}
                 </div>

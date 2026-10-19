@@ -83,7 +83,7 @@ export function AttendancePage() {
         <Button onClick={() => geo.getPosition()} variant="outline" size="md" disabled={geo.loading}>
           {geo.loading ? t('detail.gpsLocating') : t('detail.gpsGet')}
         </Button>
-        {geo.error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>{tm(geo.error)}</p>}
+        {geo.error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginTop: 6 }}>{tm(geo.error)}</p>}
       </div>
 
       {/* Shift */}
@@ -106,7 +106,7 @@ export function AttendancePage() {
         )}
 
         {todayQuery.error && (
-          <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginBottom: 10 }}>
+          <p role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 10 }}>
             {t('att.loadError', { message: (todayQuery.error as Error).message })}
           </p>
         )}
@@ -122,7 +122,7 @@ export function AttendancePage() {
           </div>
         )}
 
-        {error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginBottom: 10 }}>{tm(error)}</p>}
+        {error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 10 }}>{tm(error)}</p>}
 
         <div style={{ display: 'flex', gap: 8 }}>
           {!isClockedIn && !todayQuery.isLoading && (

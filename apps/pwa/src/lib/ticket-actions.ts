@@ -63,6 +63,18 @@ export function actionButtons(available: unknown): ActionButton[] {
   }));
 }
 
+/** What the device state lacks for `b`, as message keys; empty when the button may be pressed. */
+export function missingRequirements(
+  b: Pick<ActionButton, 'needsOnline' | 'needsGps' | 'needsPhoto'>,
+  state: { online: boolean; gpsFresh: boolean; photos: number },
+): MessageKey[] {
+  const missing: MessageKey[] = [];
+  if (b.needsGps && !state.gpsFresh) missing.push('detail.req.gps');
+  if (b.needsPhoto && state.photos === 0) missing.push('detail.req.photo');
+  if (b.needsOnline && !state.online) missing.push('detail.req.online');
+  return missing;
+}
+
 export function statusForAction(action: FieldAction): string | null {
   return DEFS[action].status;
 }

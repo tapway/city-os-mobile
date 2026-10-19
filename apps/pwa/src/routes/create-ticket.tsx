@@ -114,7 +114,7 @@ export function CreateTicketPage() {
         style={{
           display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, background: 'none',
           border: 'none', color: 'var(--cyan)', cursor: 'pointer', fontFamily: 'var(--font-label)',
-          fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em',
+          fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em',
         }}
       >
         <ArrowLeft size={16} /> {t('create.cancel')}
@@ -138,7 +138,7 @@ export function CreateTicketPage() {
         <Button onClick={() => geo.getPosition()} variant="outline" size="md" disabled={geo.loading}>
           {geo.loading ? t('detail.gpsLocating') : t('detail.gpsGet')}
         </Button>
-        {geo.error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>{tm(geo.error)}</p>}
+        {geo.error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginTop: 6 }}>{tm(geo.error)}</p>}
       </div>
 
       {/* Title */}
@@ -202,7 +202,7 @@ export function CreateTicketPage() {
           ))}
         </select>
         {typesError && (
-          <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>
+          <p role="alert" style={{ color: 'var(--danger)', fontSize: 12, marginTop: 6 }}>
             {t('create.typesError', { message: (typesError as Error).message })}
           </p>
         )}
@@ -219,7 +219,7 @@ export function CreateTicketPage() {
               onClick={() => setUrgency(u)}
               aria-pressed={urgency === u}
               style={{
-                flex: 1, padding: '8px 4px', fontSize: 10, fontFamily: 'var(--font-label)',
+                flex: 1, padding: '8px 4px', fontSize: 12, fontFamily: 'var(--font-label)',
                 textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer',
                 border: `1px solid ${urgency === u ? 'var(--cyan)' : 'var(--border)'}`,
                 background: urgency === u ? 'rgba(61,232,255,0.1)' : 'transparent',
@@ -297,7 +297,7 @@ export function CreateTicketPage() {
 
       {error && (
         <div className="glass-panel" style={{ padding: '10px', marginBottom: 12, borderColor: 'rgba(239,68,68,0.4)' }}>
-          <p role="alert" style={{ color: 'var(--danger)', fontSize: 11 }}>{tm(error)}</p>
+          <p role="alert" style={{ color: 'var(--danger)', fontSize: 12 }}>{tm(error)}</p>
         </div>
       )}
 
