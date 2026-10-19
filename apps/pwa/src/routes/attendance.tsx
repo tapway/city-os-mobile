@@ -80,7 +80,7 @@ export function AttendancePage() {
             ? `${geo.fix.lat.toFixed(6)}, ${geo.fix.lng.toFixed(6)}${geo.accuracy ? ` (±${Math.round(geo.accuracy)} m)` : ''} · ${formatFixAge(geo.ageMs)}`
             : t('att.noGps')}
         </p>
-        <Button onClick={() => geo.getPosition()} variant="outline" size="sm" disabled={geo.loading}>
+        <Button onClick={() => geo.getPosition()} variant="outline" size="md" disabled={geo.loading}>
           {geo.loading ? t('detail.gpsLocating') : t('detail.gpsGet')}
         </Button>
         {geo.error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>{tm(geo.error)}</p>}

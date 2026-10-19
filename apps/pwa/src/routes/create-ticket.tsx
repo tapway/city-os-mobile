@@ -135,7 +135,7 @@ export function CreateTicketPage() {
             ? `${geo.fix.lat.toFixed(6)}, ${geo.fix.lng.toFixed(6)}${geo.accuracy ? ` (±${Math.round(geo.accuracy)} m)` : ''} · ${formatFixAge(geo.ageMs)}`
             : t('create.noGps')}
         </p>
-        <Button onClick={() => geo.getPosition()} variant="outline" size="sm" disabled={geo.loading}>
+        <Button onClick={() => geo.getPosition()} variant="outline" size="md" disabled={geo.loading}>
           {geo.loading ? t('detail.gpsLocating') : t('detail.gpsGet')}
         </Button>
         {geo.error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>{tm(geo.error)}</p>}
@@ -236,7 +236,7 @@ export function CreateTicketPage() {
       {/* Photo */}
       <div className="glass-panel" style={{ padding: '14px', marginBottom: 12 }}>
         <span className="hud-label" style={{ marginBottom: 6, display: 'block' }}>{t('create.photo')}</span>
-        <Button onClick={handleCapture} variant="outline" size="sm">
+        <Button onClick={handleCapture} variant="outline" size="md">
           <Camera size={14} /> {t('create.capture')}
         </Button>
         {images.length > 0 && (
