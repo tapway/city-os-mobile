@@ -382,7 +382,7 @@ export function TicketDetailPage() {
             <span style={{ fontSize: 11, color: geo.isFresh ? 'var(--ink)' : 'var(--ink-dim)', flex: 1 }}>
               {gpsLabel}
             </span>
-            <Button data-testid="ticket-gps-get" onClick={() => geo.getPosition()} variant="outline" size="sm" disabled={geo.loading}>
+            <Button data-testid="ticket-gps-get" onClick={() => geo.getPosition()} variant="outline" size="md" disabled={geo.loading}>
               {geo.loading ? t('detail.gpsLocating') : t('detail.gpsGet')}
             </Button>
           </div>
@@ -422,7 +422,7 @@ export function TicketDetailPage() {
 
           {/* Evidence */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Button data-testid="ticket-add-photo" onClick={handleCapture} variant="outline" size="sm" disabled={images.length >= MAX_EVIDENCE_PHOTOS}>
+            <Button data-testid="ticket-add-photo" onClick={handleCapture} variant="outline" size="md" disabled={images.length >= MAX_EVIDENCE_PHOTOS}>
               <Camera size={14} /> {t('detail.addPhoto')}
             </Button>
             <span style={{ fontSize: 10, color: 'var(--ink-faint)' }}>

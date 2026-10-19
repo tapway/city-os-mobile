@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Tailwind v4 only scans this package by default. Button and Badge live in
+   packages/ui, so without this their utility classes (h-11, bg-[var(--cyan)],
+   rounded-sm ...) never reach the build and every CTA renders as bare text. */
+@source "../../../packages/ui/src";
+
 /* ═══════════════════════════════════════════════════════════════
  * Terra HUD Theme — dark glass-morphism design system
  * Matches the City Help console aesthetic (PR #31 Terra theme)
