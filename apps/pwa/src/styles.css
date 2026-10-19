@@ -103,6 +103,78 @@ body::before {
   background: var(--bg-deep);
 }
 
+/* Top bar: one line from 360px up. The title gives way (ellipsis) before any
+   control wraps; the controls keep a 44px touch target. Below 440px Sign out is
+   icon-only (its text stays in the accessibility tree via aria-label + clip). */
+.topbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--glass);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(24px);
+}
+.topbar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-label);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.topbar > * {
+  flex-shrink: 0;
+}
+.topbar > .topbar-title {
+  flex-shrink: 1;
+}
+.topbar-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 10px;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-family: var(--font-label);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+@media (max-width: 439px) {
+  .signout-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .topbar-signout {
+    padding: 0;
+  }
+}
+@media (min-width: 440px) {
+  .topbar {
+    padding: 6px 16px;
+  }
+}
+
 /* Glass panel — the primary card pattern */
 .glass-panel {
   background: var(--glass);
