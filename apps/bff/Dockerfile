@@ -27,7 +27,7 @@ COPY src /app/src
 RUN pip install --no-cache-dir .
 
 # Run unprivileged.
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin bff
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin bff
 USER 10001
 
 EXPOSE 8002
