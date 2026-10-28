@@ -1,0 +1,24 @@
+# Root build context is used by apps/pwa/Dockerfile. Keep it small and free of local state.
+.git
+.github
+.superpowers
+**/node_modules
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example
+**/.venv
+**/.venv-test
+**/__pycache__
+**/.pytest_cache
+apps/bff
+apps/pwa/e2e
+apps/pwa/tests
+apps/pwa/.impeccable
+apps/pwa/test-results
+apps/pwa/playwright-report
+docs
+deploy
