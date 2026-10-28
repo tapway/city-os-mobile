@@ -71,7 +71,7 @@ anywhere: it prints the resolved values, secrets included. The template lists ev
 | `MINIO_*` | Optional; evidence-photo uploads stay disabled unless endpoint + both keys are set. |
 
 `localhost:8001` in an env file means the bff container itself. To reach a service on the docker host use
-`host.docker.internal` (mapped for you), but note a service bound only to the host's `127.0.0.1` is not reachable
+`host.docker.internal` (opt-in: uncomment `extra_hosts` in `deploy/docker-compose.mobile.yml`), but note a service bound only to the host's `127.0.0.1` is not reachable
 that way: join its network instead, by adding the override file to every compose command:
 `-f deploy/docker-compose.mobile.yml -f deploy/docker-compose.mobile.upstream.yml` with `UPSTREAM_NETWORK=deploy_default`.
 (Compose cannot attach an optional network from one file, hence the second file.)
