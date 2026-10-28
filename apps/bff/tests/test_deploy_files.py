@@ -50,8 +50,53 @@ def test_bff_healthcheck_route_exists():
     from src.main import app
 
     assert TestClient(app).get("/health").status_code == 200
-    for text in ((ROOT / "apps/bff/Dockerfile").read_text(), COMPOSE.read_text()):
-        assert "127.0.0.1:8002/health" in text
+    # Compose and the Dockerfile must probe that route on the port uvicorn serves.
+    compose_probe = " ".join(_compose()["services"]["bff"]["healthcheck"]["test"])
+    dockerfile = (ROOT / "apps/bff/Dockerfile").read_text()
+    for text in (compose_probe, dockerfile):
+        assert re.search(r"127\.0\.0\.1:8002/health\b", text)
+
+
+def test_cookie_secure_defaults_to_true():
+    assert _compose()["services"]["bff"]["environment"]["COOKIE_SECURE"] == "${COOKIE_SECURE:-true}"
+
+
+def test_host_gateway_alias_is_opt_in():
+    assert "extra_hosts" not in _compose()["services"]["bff"]
+
+
+def test_bff_hides_server_header_and_trusts_proxy_headers():
+    dockerfile = (ROOT / "apps/bff/Dockerfile").read_text()
+    for flag in ("--proxy-headers", "--no-server-header"):
+        assert flag in dockerfile
+
+
+def test_pwa_headers_ship_csp_report_only_not_enforcing():
+    conf = (ROOT / "apps/pwa/docker/security-headers.conf").read_text()
+    active = [l for l in conf.splitlines() if l.strip().startswith("add_header")]
+    names = {l.split()[1] for l in active}
+    assert "Content-Security-Policy-Report-Only" in names
+    assert "Content-Security-Policy" not in names  # enforcing is a deliberate follow-up
+    assert "Permissions-Policy" in names
+
+
+def test_nginx_config_is_valid():
+    import shutil
+
+    image = "nginxinc/nginx-unprivileged:1.27-alpine"
+    if not shutil.which("docker"):
+        pytest.skip("docker not available: nginx -t not run")
+    if subprocess.run(["docker", "image", "inspect", image], capture_output=True).returncode != 0:
+        pytest.skip(f"{image} not present locally: nginx -t not run")
+    conf = ROOT / "apps/pwa/docker"
+    proc = subprocess.run(
+        ["docker", "run", "--rm", "--entrypoint", "nginx",
+         "-v", f"{conf}/nginx.conf:/etc/nginx/conf.d/default.conf:ro",
+         "-v", f"{conf}/security-headers.conf:/etc/nginx/snippets/security-headers.conf:ro",
+         image, "-t"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_external_network_is_only_in_the_optional_override():
@@ -118,3 +163,81 @@ def test_dockerfile_mentions_city_guard_only_if_the_code_imports_it():
 def test_build_script_needs_no_extra_folders():
     text = (DEPLOY / "build-mobile.sh").read_text()
     assert "--city-guard" not in text and "CITY_GUARD" not in text
+
+
+# ---- build-mobile.sh tag handling, exercised against a stub `docker` ----------
+import os
+import stat
+import tempfile
+
+STUB = """#!/usr/bin/env bash
+echo "$*" >> "$STUB_LOG"
+case "$1 $2" in
+  "image inspect")
+    ref="$3"
+    case ",$STUB_EXISTING," in *",$ref,"*) exit 0 ;; esac
+    case "$ref" in node:*|nginxinc/*|python:*) echo "x@sha256:0" ; exit 0 ;; esac
+    exit 1 ;;
+esac
+if [ "$1" = build ]; then
+  case "$*" in *"$STUB_FAIL_BUILD"*) [ -n "$STUB_FAIL_BUILD" ] && exit 1 ;; esac
+fi
+exit 0
+"""
+
+
+def _run_build(existing="", fail_build="", tag="t1"):
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = Path(tmp, "bin")
+        bindir.mkdir()
+        docker = bindir / "docker"
+        docker.write_text(STUB)
+        docker.chmod(docker.stat().st_mode | stat.S_IEXEC)
+        log = Path(tmp, "calls.log")
+        log.write_text("")
+        env = {
+            **os.environ,
+            "PATH": f"{bindir}:{os.environ['PATH']}",
+            "STUB_LOG": str(log),
+            "STUB_EXISTING": existing,
+            "STUB_FAIL_BUILD": fail_build,
+            "TMPDIR": tmp,
+        }
+        proc = subprocess.run(
+            ["bash", str(DEPLOY / "build-mobile.sh"), "--tag", tag],
+            env=env, capture_output=True, text=True, cwd=ROOT,
+        )
+        calls = [l for l in log.read_text().splitlines() if not l.startswith("image inspect")]
+        return proc, calls
+
+
+PWA = "tapway/city-os-mobile-pwa"
+BFF = "tapway/city-os-mobile-bff"
+
+
+@pytest.mark.parametrize("existing", [f"{PWA}:t1", f"{BFF}:t1", f"{PWA}:pre-t1", f"{BFF}:pre-t1"])
+def test_build_refuses_when_the_tag_or_its_rollback_tag_exists(existing):
+    proc, calls = _run_build(existing=existing)
+    assert proc.returncode != 0
+    assert "already exists" in proc.stderr and "docker rmi" in proc.stderr
+    assert calls == []  # nothing built, nothing tagged
+
+
+def test_build_moves_no_tag_when_a_build_fails():
+    proc, calls = _run_build(existing=f"{PWA}:latest,{BFF}:latest", fail_build="city-os-mobile-bff")
+    assert proc.returncode != 0
+    assert not [c for c in calls if c.startswith("tag ")]
+
+
+def test_build_builds_both_then_retags_rollback_then_latest():
+    proc, calls = _run_build(existing=f"{PWA}:latest,{BFF}:latest")
+    assert proc.returncode == 0, proc.stderr
+    builds = [i for i, c in enumerate(calls) if c.startswith("build ")]
+    tags = [i for i, c in enumerate(calls) if c.startswith("tag ")]
+    assert len(builds) == 2 and len(tags) == 4
+    assert max(builds) < min(tags)
+    assert all(":latest" not in calls[i] for i in builds)  # builds carry only :<tag>
+    assert tags == sorted(tags)
+    tag_calls = [calls[i] for i in tags]
+    assert tag_calls[:2] == [f"tag {PWA}:latest {PWA}:pre-t1", f"tag {BFF}:latest {BFF}:pre-t1"]
+    assert tag_calls[2:] == [f"tag {PWA}:t1 {PWA}:latest", f"tag {BFF}:t1 {BFF}:latest"]

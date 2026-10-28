@@ -32,5 +32,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # (the TLS-terminating host proxy via the pwa container), so redirects the BFF
 # generates keep the public https scheme. "*" is safe because this port is not
 # published; only containers on the compose network (the pwa) can reach it.
+# Never publish port 8002: with it open, any client could forge X-Forwarded-*.
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8002", \
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+     "--proxy-headers", "--forwarded-allow-ips", "*", "--no-server-header"]

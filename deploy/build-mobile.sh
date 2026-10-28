@@ -11,14 +11,16 @@
 #   1. `git archive <ref>` into a scratch folder (so only COMMITTED files are built).
 #   2. PWA: build context = the archived monorepo root (apps/pwa/Dockerfile).
 #      BFF: build context = the archived apps/bff.
-#   3. Tags tapway/city-os-mobile-{pwa,bff}:<tag> and :latest. Before :latest moves,
-#      the previous :latest is kept as :pre-<tag> so a rollback is one `docker tag`.
-#   4. Prints the digests of the base images that were used (keep them in the build log).
+#   3. Refuses to run if :<tag> or :pre-<tag> already exists for either image.
+#   4. Builds both images tagged only :<tag>. Only when BOTH succeed are the tags
+#      moved: the previous :latest becomes :pre-<tag> (rollback), then :latest
+#      points at :<tag>. If either build fails, no tag moves.
+#   5. Prints the digests of the base images that were used (keep them in the build log).
 #
 # Nothing here reads or prints secrets: no env file is used, no secret build args.
 set -euo pipefail
 
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REF="HEAD"
@@ -45,6 +47,16 @@ case "$TAG" in *[!A-Za-z0-9._-]*|"") echo "error: tag '$TAG' has characters dock
 PWA_IMG="tapway/city-os-mobile-pwa"
 BFF_IMG="tapway/city-os-mobile-bff"
 
+for img in "$PWA_IMG" "$BFF_IMG"; do
+  for t in "$TAG" "pre-$TAG"; do
+    if docker image inspect "$img:$t" >/dev/null 2>&1; then
+      echo "error: $img:$t already exists. Choose another --tag, or remove it first:" >&2
+      echo "         docker rmi $PWA_IMG:$t $BFF_IMG:$t" >&2
+      exit 1
+    fi
+  done
+done
+
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/city-os-mobile-build.XXXXXX")"
 trap 'rm -rf "$SCRATCH"' EXIT
 
@@ -66,7 +78,19 @@ PWA_ARGS=(); BFF_ARGS=()
 [ -z "${NGINX_IMAGE:-}" ]  || PWA_ARGS+=(--build-arg "NGINX_IMAGE=$NGINX_IMAGE")
 [ -z "${PYTHON_IMAGE:-}" ] || BFF_ARGS+=(--build-arg "PYTHON_IMAGE=$PYTHON_IMAGE")
 
-# Keep the previous :latest as :pre-<tag> before anything moves.
+echo "==> building $PWA_IMG:$TAG"
+docker build -f "$SCRATCH/repo/apps/pwa/Dockerfile" \
+  --label "org.opencontainers.image.revision=$SHA" \
+  ${PWA_ARGS[@]+"${PWA_ARGS[@]}"} \
+  -t "$PWA_IMG:$TAG" "$SCRATCH/repo"
+
+echo "==> building $BFF_IMG:$TAG"
+docker build \
+  --label "org.opencontainers.image.revision=$SHA" \
+  ${BFF_ARGS[@]+"${BFF_ARGS[@]}"} \
+  -t "$BFF_IMG:$TAG" "$SCRATCH/repo/apps/bff"
+
+# Both builds succeeded (set -e): now, and only now, move tags.
 if [ "$MOVE_LATEST" = 1 ]; then
   for img in "$PWA_IMG" "$BFF_IMG"; do
     if docker image inspect "$img:latest" >/dev/null 2>&1; then
@@ -74,22 +98,11 @@ if [ "$MOVE_LATEST" = 1 ]; then
       echo "==> rollback tag: $img:pre-$TAG (was :latest)"
     fi
   done
+  for img in "$PWA_IMG" "$BFF_IMG"; do
+    docker tag "$img:$TAG" "$img:latest"
+  done
+  echo "==> :latest now points at :$TAG"
 fi
-
-LATEST_PWA=(); LATEST_BFF=()
-if [ "$MOVE_LATEST" = 1 ]; then LATEST_PWA=(-t "$PWA_IMG:latest"); LATEST_BFF=(-t "$BFF_IMG:latest"); fi
-
-echo "==> building $PWA_IMG:$TAG"
-docker build -f "$SCRATCH/repo/apps/pwa/Dockerfile" \
-  --label "org.opencontainers.image.revision=$SHA" \
-  ${PWA_ARGS[@]+"${PWA_ARGS[@]}"} \
-  -t "$PWA_IMG:$TAG" ${LATEST_PWA[@]+"${LATEST_PWA[@]}"} "$SCRATCH/repo"
-
-echo "==> building $BFF_IMG:$TAG"
-docker build \
-  --label "org.opencontainers.image.revision=$SHA" \
-  ${BFF_ARGS[@]+"${BFF_ARGS[@]}"} \
-  -t "$BFF_IMG:$TAG" ${LATEST_BFF[@]+"${LATEST_BFF[@]}"} "$SCRATCH/repo/apps/bff"
 
 echo "==> base images used (record these; pin with the env vars above):"
 for base in "${NODE_IMAGE:-node:22-alpine}" "${NGINX_IMAGE:-nginxinc/nginx-unprivileged:1.27-alpine}" "${PYTHON_IMAGE:-python:3.11-slim}"; do

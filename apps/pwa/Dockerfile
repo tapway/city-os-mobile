@@ -32,6 +32,10 @@ RUN pnpm --filter @city-os/pwa build \
 # ---- serve ------------------------------------------------------------------
 # nginx-unprivileged runs as uid 101 and listens on 8080.
 FROM ${NGINX_IMAGE}
+# Nothing references the stock error page; ship only the app.
+USER root
+RUN rm -rf /usr/share/nginx/html/*
+USER 101
 COPY apps/pwa/docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY apps/pwa/docker/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /repo/apps/pwa/dist /usr/share/nginx/html

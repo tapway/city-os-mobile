@@ -14,9 +14,11 @@ services:
   bff:
     image: tapway/city-os-mobile-bff:${MOBILE_TAG:-latest}
     restart: unless-stopped
-    # Reach a City Help / Keycloak / MinIO running on the docker host itself.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # Opt-in: uncomment to reach a City Help / Keycloak / MinIO that listens on
+    # the docker host's own interfaces via `host.docker.internal`. Off by default
+    # so the container cannot reach the host's loopback-adjacent services.
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
     environment:
       # --- Keycloak ---------------------------------------------------------
       KEYCLOAK_URL: ${KEYCLOAK_URL:?set KEYCLOAK_URL (server-side realm base) in the env file}
