@@ -29,6 +29,9 @@ const check = (name, ok, detail = '') => { results.push(ok); console.log(`${ok ?
     viewport: { width: 360, height: 800 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
   });
   const page = await ctx.newPage();
+  // Content-Security-Policy-Report-Only violations show up as console messages; count them (informational).
+  const cspHits = [];
+  page.on('console', (m) => { if (/Content Security Policy|\[Report Only\]/i.test(m.text())) cspHits.push(m.text().slice(0, 160)); });
   try {
     await page.goto(`${base}/login`);
     await page.fill('#login-username', user);
@@ -85,6 +88,8 @@ const check = (name, ok, detail = '') => { results.push(ok); console.log(`${ok ?
     check('header is one line at 360x800', oneLine, header ? `height=${Math.round(header.height)}px` : 'no header');
     check('no horizontal overflow', !!header && !header.overflowX);
 
+    console.log(`INFO  CSP report-only violations seen: ${cspHits.length}`);
+    cspHits.slice(0, 5).forEach((t) => console.log(`      ${t}`));
     await page.screenshot({ path: shot });
     console.log(`screenshot: ${shot}`);
   } catch (e) {
