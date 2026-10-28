@@ -20,7 +20,7 @@ The compose project is named `city-os-mobile` so it never collides with City Hel
 ## Prerequisites
 
 - Docker Engine 24+ with the compose plugin (v2.20+).
-- To build: a git checkout of this repo and a local copy of the private `city-guard` repo.
+- To build: a plain `git clone` of this repo (nothing else) and internet access to docker.io, npm and PyPI.
   To only run: nothing but the two image archives (see "Moving to another server").
 - A TLS-terminating reverse proxy on the host (see "TLS in front"). **The app needs HTTPS**:
   the service worker, GPS and install prompt only work in a secure context (https, or `localhost`).
@@ -29,19 +29,16 @@ The compose project is named `city-os-mobile` so it never collides with City Hel
 ## Build
 
 ```bash
-deploy/build-mobile.sh --city-guard /path/to/city-guard [--ref <git-ref>] [--tag <tag>] [--no-latest]
+deploy/build-mobile.sh [--ref <git-ref>] [--tag <tag>] [--no-latest]
 ```
 
 - Builds from `git archive <ref>` (default `HEAD`), so only committed files go in. Tag defaults to the short commit id.
-- **Build contexts.** The PWA context is the monorepo root (`docker build -f apps/pwa/Dockerfile .`).
-  The BFF context is a scratch folder holding `apps/bff` plus a copy of `city-guard` at `./city-guard`,
-  because `apps/bff/Dockerfile` does `COPY city-guard /tmp/city-guard` (private package, no git credentials in the build).
-  The script assembles that, stripping `.git`, `.env*`, keys and virtualenvs from the copy, and refuses to build
-  if a secret-looking file is still in either context. This is the same pattern City Help's images use.
-  Building `apps/bff` directly with plain `docker build` fails at that `COPY` on purpose.
+- **Build contexts.** The PWA context is the monorepo root (`docker build -f apps/pwa/Dockerfile .`); the BFF
+  context is `apps/bff` (`docker build apps/bff`). The script builds both from the archive and refuses to build
+  if a secret-looking file (`.env`, keys) is in it.
 - Tags `…:<tag>` and `…:latest`. Before `latest` moves, the previous `latest` is kept as `…:pre-<tag>` (rollback).
 - Wrap in `flock` + `nice` on a shared box. Measured here: ~1m40s cold (base images cached), a few seconds when cached.
-- Nothing secret is read or printed; no build args.
+- Nothing secret is read or printed. The script prints the digests of the base images it used.
 
 ## Configure
 
@@ -92,7 +89,7 @@ Browser smoke test (read-only; needs `pnpm install` at the repo root): see the h
 
 ```bash
 # deploy a new build
-deploy/build-mobile.sh --city-guard /path/to/city-guard --tag 2026-10-29a
+deploy/build-mobile.sh --tag 2026-10-29a
 $C up -d --no-deps --force-recreate bff pwa     # --no-deps: touch only what you name
 
 # roll back to the previous build (kept as pre-<tag>)
@@ -178,8 +175,12 @@ include or need the alias.** It would only matter if a site switches to `pkce`.
 - **Password grant.** The Keycloak client must allow "direct access grants". Confirm on the target realm.
 - **HTTPS is mandatory** for the service worker and GPS; use a real certificate (an untrusted one blocks the worker).
   Hostname and certificate are DBKL IT's call.
-- **`city-guard` in the BFF image.** `apps/bff/Dockerfile` installs it, but nothing in `apps/bff/src` imports it
-  (`tests/test_packaging.py` pins that). It adds most of the BFF image's size; dropping the `COPY`/`pip install` lines
-  would remove the sibling-repo requirement entirely. Left as is on instruction.
+- **Floating base images.** `node:22-alpine`, `nginxinc/nginx-unprivileged:1.27-alpine` and `python:3.11-slim` are tags, so two
+  builds on different days can differ. The build prints the digest of each base image it used: keep that in the build log.
+  To pin, pass digests (works for the script and for plain `docker build --build-arg`):
+  `NODE_IMAGE=node:22-alpine@sha256:<digest> NGINX_IMAGE=nginxinc/nginx-unprivileged:1.27-alpine@sha256:<digest> PYTHON_IMAGE=python:3.11-slim@sha256:<digest> deploy/build-mobile.sh`.
+- **`X-Forwarded-For` must be overwritten by the host proxy, not appended to.** The BFF rate limiter keys on the first entry,
+  so a proxy that appends (`$proxy_add_x_forwarded_for`) lets a client pick its own bucket and dodge the login limit.
+  Use `proxy_set_header X-Forwarded-For $remote_addr;` (nginx); Caddy's default already replaces it.
 - **Network reach.** The bff must reach City Help, Keycloak and (optionally) MinIO; firewalls and DNS on the target are unknown.
 - **Time and persistence.** The stack keeps no state of its own (no volumes); the rate limiter is in memory and resets on restart.

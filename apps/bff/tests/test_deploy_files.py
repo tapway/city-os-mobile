@@ -25,7 +25,7 @@ def _compose() -> dict:
 
 
 def test_project_name_does_not_collide_with_city_help():
-    assert _compose()["name"] not in {"deploy", "city-help", "city-guard"}
+    assert _compose()["name"] not in {"deploy", "city-help"}
 
 
 def test_only_the_pwa_publishes_a_port_and_only_on_loopback():
@@ -83,7 +83,7 @@ def test_env_template_covers_every_variable_compose_requires():
 def test_bff_image_runs_unprivileged_and_copies_only_what_it_needs():
     dockerfile = (ROOT / "apps/bff/Dockerfile").read_text()
     assert re.search(r"^USER\s+\S+", dockerfile, re.M)
-    assert "COPY . " not in dockerfile  # the context also holds ./city-guard and may hold .env files
+    assert "COPY . " not in dockerfile  # copy only pyproject.toml and src/: a context may hold .env files
     assert "--proxy-headers" in dockerfile
 
 
@@ -96,3 +96,25 @@ def test_pwa_image_deletes_sourcemaps_and_runs_unprivileged():
 
 def test_build_script_is_valid_bash():
     subprocess.run(["bash", "-n", str(DEPLOY / "build-mobile.sh")], check=True)
+
+
+def _imports_city_guard() -> bool:
+    src = Path(__file__).resolve().parents[1] / "src"
+    return any(
+        re.search(r"^\s*(import|from)\s+city_guard\b", f.read_text(), re.M) for f in src.rglob("*.py")
+    )
+
+
+def test_dockerfile_mentions_city_guard_only_if_the_code_imports_it():
+    # The BFF used to build with a sibling copy of the private city-guard package
+    # that no module imported. Do not bring it (and the sibling-folder build) back
+    # unless the code really needs it.
+    dockerfile = (ROOT / "apps/bff/Dockerfile").read_text()
+    if not _imports_city_guard():
+        assert "city-guard" not in dockerfile.lower().replace("_", "-")
+    assert "city-guard" not in (DEPLOY / "build-mobile.sh").read_text() or _imports_city_guard()
+
+
+def test_build_script_needs_no_extra_folders():
+    text = (DEPLOY / "build-mobile.sh").read_text()
+    assert "--city-guard" not in text and "CITY_GUARD" not in text

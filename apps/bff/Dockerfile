@@ -1,27 +1,19 @@
 # City OS Mobile BFF (FastAPI).
 #
-# BUILD CONTEXT = a folder holding this app's files (apps/bff) PLUS a sibling
-# copy of the private `city-guard` package at ./city-guard:
+# BUILD CONTEXT = apps/bff (this folder):
+#   docker build -t tapway/city-os-mobile-bff:dev apps/bff
+# deploy/build-mobile.sh does this from a clean `git archive` of a ref.
 #
-#   context/
-#     Dockerfile  pyproject.toml  src/  .dockerignore
-#     city-guard/            <- copy of the city-guard repo (no .git, no .env*)
-#
-# deploy/build-mobile.sh assembles exactly that from a git ref. Building straight
-# from apps/bff fails at `COPY city-guard` by design (private package, no
-# credentials in the build).
-FROM python:3.11-slim
+# Pin the base image by digest with --build-arg PYTHON_IMAGE=python:3.11-slim@sha256:...
+ARG PYTHON_IMAGE=python:3.11-slim
+FROM ${PYTHON_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# City-guard from the local copy (avoids git credentials in the build).
-COPY city-guard /tmp/city-guard
-RUN pip install --no-cache-dir /tmp/city-guard && rm -rf /tmp/city-guard
-
 # BFF source. Only pyproject.toml and src/ are copied, so nothing else that sits
-# in the context (city-guard/, .env files, tests) can end up in the image.
+# in the context (.env files, tests, virtualenvs) can end up in the image.
 COPY pyproject.toml /app/pyproject.toml
 COPY src /app/src
 RUN pip install --no-cache-dir .

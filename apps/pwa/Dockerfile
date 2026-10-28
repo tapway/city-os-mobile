@@ -5,7 +5,11 @@
 # (deploy/build-mobile.sh does this from a clean `git archive` of a ref.)
 
 # ---- build ------------------------------------------------------------------
-FROM node:22-alpine AS build
+# Pin by digest with --build-arg NODE_IMAGE=node:22-alpine@sha256:... (and NGINX_IMAGE).
+ARG NODE_IMAGE=node:22-alpine
+ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.27-alpine
+
+FROM ${NODE_IMAGE} AS build
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true
 WORKDIR /repo
 # pnpm version comes from "packageManager" in the root package.json.
@@ -27,7 +31,7 @@ RUN pnpm --filter @city-os/pwa build \
 
 # ---- serve ------------------------------------------------------------------
 # nginx-unprivileged runs as uid 101 and listens on 8080.
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM ${NGINX_IMAGE}
 COPY apps/pwa/docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY apps/pwa/docker/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /repo/apps/pwa/dist /usr/share/nginx/html
