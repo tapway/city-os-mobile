@@ -48,12 +48,11 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
       MINIO_BUCKET: ${MINIO_BUCKET:-city-help}
       MINIO_SECURE: ${MINIO_SECURE:-false}
+    # To join an existing docker network (e.g. City Help's "deploy_default") so
+    # CITY_HELP_API_URL / KEYCLOAK_URL can use container names, add the override
+    # file docker-compose.mobile.upstream.yml (reads UPSTREAM_NETWORK).
     networks:
       - default
-      # Optional: join an existing network (e.g. City Help's "deploy_default")
-      # so CITY_HELP_API_URL / KEYCLOAK_URL can use container names. Leave
-      # UPSTREAM_NETWORK unset when they are plain URLs (LAN / host).
-      - upstream
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8002/health', timeout=3).read()"]
       interval: 30s
@@ -99,9 +98,3 @@ services:
 
 networks:
   default: {}
-  upstream:
-    external: true
-    # "bridge" (docker's built-in network) is the no-op default: attaching to it
-    # changes nothing for the BFF. Set UPSTREAM_NETWORK=deploy_default to join
-    # City Help's network.
-    name: ${UPSTREAM_NETWORK:-bridge}

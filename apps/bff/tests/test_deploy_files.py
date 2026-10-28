@@ -54,10 +54,14 @@ def test_bff_healthcheck_route_exists():
         assert "127.0.0.1:8002/health" in text
 
 
-def test_compose_external_network_is_optional():
-    upstream = _compose()["networks"]["upstream"]
+def test_external_network_is_only_in_the_optional_override():
+    # The base file must work with no pre-existing network; joining one (for
+    # example City Help's deploy_default) lives in the override file.
+    assert "upstream" not in _compose().get("networks", {})
+    override = yaml.safe_load((DEPLOY / "docker-compose.mobile.upstream.yml").read_text())
+    upstream = override["networks"]["upstream"]
     assert upstream["external"] is True
-    assert "${UPSTREAM_NETWORK:-" in upstream["name"]
+    assert "${UPSTREAM_NETWORK" in upstream["name"]
 
 
 def test_env_template_holds_no_secret_values():

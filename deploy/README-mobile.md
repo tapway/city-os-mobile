@@ -61,12 +61,14 @@ anywhere: it prints the resolved values, secrets included. The template lists ev
 | `KEYCLOAK_CLIENT_ID` / `KEYCLOAK_CLIENT_SECRET` | The mobile client. Secret empty for a public client (the current demo client has none). |
 | `CITY_HELP_API_URL` | e.g. `http://deploy-api-1:8001` (same docker network) or `http://10.0.0.5:8001` (LAN). |
 | `COOKIE_SECURE` | `true` (default in compose). Needs https in front. |
-| `UPSTREAM_NETWORK` | Optional. Name of an existing docker network to join, e.g. `deploy_default` when City Help runs on this host. Empty = not used. |
+| `UPSTREAM_NETWORK` | Optional. Existing docker network for the bff to join, e.g. `deploy_default` when City Help runs on this host. Only read when you add `-f deploy/docker-compose.mobile.upstream.yml` (see below). |
 | `MINIO_*` | Optional; evidence-photo uploads stay disabled unless endpoint + both keys are set. |
 
 `localhost:8001` in an env file means the bff container itself. To reach a service on the docker host use
 `host.docker.internal` (mapped for you), but note a service bound only to the host's `127.0.0.1` is not reachable
-that way: join its network with `UPSTREAM_NETWORK` instead.
+that way: join its network instead, by adding the override file to every compose command:
+`-f deploy/docker-compose.mobile.yml -f deploy/docker-compose.mobile.upstream.yml` with `UPSTREAM_NETWORK=deploy_default`.
+(Compose cannot attach an optional network from one file, hence the second file.)
 
 ## Run, check, stop
 
@@ -146,7 +148,7 @@ change the compose port mapping to that machine's interface deliberately; the de
 ```bash
 TAG=2026-10-29a
 docker save tapway/city-os-mobile-pwa:$TAG tapway/city-os-mobile-bff:$TAG | gzip > city-os-mobile-$TAG.tar.gz   # ~90 MB
-scp city-os-mobile-$TAG.tar.gz deploy/docker-compose.mobile.yml deploy/.env.mobile.example deploy/README-mobile.md user@server:
+scp city-os-mobile-$TAG.tar.gz deploy/docker-compose.mobile*.yml deploy/.env.mobile.example deploy/README-mobile.md user@server:
 # on the server
 gunzip -c city-os-mobile-$TAG.tar.gz | docker load
 # fill the env file (MOBILE_TAG=$TAG), then `$C up -d`
