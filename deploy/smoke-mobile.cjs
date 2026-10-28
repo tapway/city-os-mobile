@@ -50,7 +50,22 @@ const check = (name, ok, detail = '') => { results.push(ok); console.log(`${ok ?
     });
     check('service worker registers', sw === 'active' || sw === 'registered', sw);
 
-    await ticketLink.click();
+    // The session is a Secure + HttpOnly refresh cookie set by the BFF through
+    // the proxy. Check its flags (names and flags only, never values), then
+    // reload: the app must restore the session via POST /auth/refresh.
+    const cookies = await ctx.cookies();
+    for (const name of ['refresh_token', 'session_user']) {
+      const c = cookies.find((k) => k.name === name);
+      check(`cookie ${name} is Secure + HttpOnly`, !!c && c.secure && c.httpOnly && c.path === '/',
+        c ? `secure=${c.secure} httpOnly=${c.httpOnly} sameSite=${c.sameSite} path=${c.path}` : 'missing');
+    }
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.getByText(/CH-\d{4}-\d+/).first().waitFor({ timeout: 30000 }).catch(() => {});
+    check('reload restores the session (no redirect to /login)',
+      /\/tickets/.test(page.url()) && (await page.getByText(/CH-\d{4}-\d+/).count()) > 0, new URL(page.url()).pathname);
+
+    await page.getByText(/CH-\d{4}-\d+/).first().click();
     await page.waitForURL(/\/tickets\/.+/, { timeout: 30000 });
     await page.waitForLoadState('networkidle');
     check('ticket detail opens', true, new URL(page.url()).pathname.replace(/[0-9a-f-]{16,}/g, ':id'));
