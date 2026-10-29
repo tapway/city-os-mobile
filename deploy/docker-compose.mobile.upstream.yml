@@ -1,0 +1,19 @@
+# Optional override: attach the bff to an EXISTING docker network, so that
+# CITY_HELP_API_URL / KEYCLOAK_URL / MINIO_ENDPOINT can use container names
+# (e.g. UPSTREAM_NETWORK=deploy_default when City Help runs on the same host).
+#
+#   docker compose -f deploy/docker-compose.mobile.yml \
+#                  -f deploy/docker-compose.mobile.upstream.yml \
+#                  --env-file /etc/city-os/mobile.env up -d
+#
+# Not needed when those URLs are plain host or LAN addresses.
+services:
+  bff:
+    networks:
+      - default
+      - upstream
+
+networks:
+  upstream:
+    external: true
+    name: ${UPSTREAM_NETWORK:?set UPSTREAM_NETWORK to the existing docker network name}

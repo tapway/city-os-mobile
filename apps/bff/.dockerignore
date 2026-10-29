@@ -1,0 +1,16 @@
+# Keep secrets and local state out of the BFF image.
+# Without this file the Dockerfile's `COPY . /app` bakes .env — including the
+# MinIO keys and the OIDC client secret — into every layer of the image.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/
+*.md
