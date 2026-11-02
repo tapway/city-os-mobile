@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from '@tanstack/react-router';
 import { AppHeader } from '../src/routes/app-header';
 import { en } from '../src/i18n/en';
 import { ms } from '../src/i18n/ms';
@@ -21,7 +22,19 @@ function rule(selector: string): string {
 }
 
 describe('AppHeader markup', () => {
-  const html = renderToStaticMarkup(createElement(AppHeader, { onSignOut: () => {} }));
+  // The bell is a <Link>, so the header needs a router in scope even in a unit test.
+  let html = '';
+  beforeAll(async () => {
+    const rootRoute = createRootRoute({
+      component: () => createElement(AppHeader, { onSignOut: () => {} }),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ['/tickets'] }),
+    });
+    await router.load();
+    html = renderToStaticMarkup(createElement(RouterProvider, { router }));
+  });
 
   it('shows the title, both language buttons and Sign out', () => {
     expect(html).toContain(en['app.header']);
