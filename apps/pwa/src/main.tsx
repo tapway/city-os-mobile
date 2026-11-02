@@ -10,6 +10,7 @@ import { TicketsPage } from './routes/tickets';
 import { TicketDetailPage } from './routes/ticket.$id';
 import { AttendancePage } from './routes/attendance';
 import { CreateTicketPage } from './routes/create-ticket';
+import { NotificationsPage } from './routes/notifications';
 import { initLang } from './i18n';
 import './styles.css';
 import { registerSW } from 'virtual:pwa-register';
@@ -103,6 +104,13 @@ const createTicketRoute = createRoute({
   beforeLoad: () => requireAuth({}),
 });
 
+const notificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/notifications',
+  component: NotificationsPage,
+  beforeLoad: () => requireAuth({}),
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   indexRoute,
@@ -110,6 +118,7 @@ const routeTree = rootRoute.addChildren([
   ticketDetailRoute,
   attendanceRoute,
   createTicketRoute,
+  notificationsRoute,
 ]);
 
 const router = createRouter({ routeTree });

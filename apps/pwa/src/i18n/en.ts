@@ -273,6 +273,28 @@ export const en = {
   'group.DIS': 'Disaster',
   'group.SLT': 'Safety',
   'group.GOV': 'Governance request',
+
+  // Alerts (in-app bell + device push)
+  'nav.notifications': 'Alerts',
+  'alerts.title': 'Alerts',
+  'alerts.empty': 'No alerts yet.',
+  'alerts.unreadCount': '{n} unread',
+  'alerts.markAll': 'Mark all read',
+  'alerts.markedAll': 'All alerts marked read.',
+  'alerts.openTicket': 'Open {uid}',
+  'alerts.deviceTitle': 'Device alerts',
+  'alerts.deviceHint': 'Get a notification on this phone when a ticket is assigned to your department, an approval is waiting for you, or an SLA breaches.',
+  'alerts.enable': 'Turn on alerts',
+  'alerts.disable': 'Turn off alerts',
+  'alerts.enabling': 'Turning on…',
+  'alerts.err': 'Could not change alerts. Check your connection and try again.',
+  'alerts.state.insecure': 'Alerts need the https address of the app.',
+  'alerts.state.unsupported': 'This browser cannot receive alerts.',
+  'alerts.state.disabled': 'Alerts are not configured on the server yet.',
+  'alerts.state.needsInstall': 'Add City OS Mobile to your Home Screen to receive alerts on iPhone.',
+  'alerts.state.blocked': 'Notifications are blocked in the browser settings. Allow them for this site, then try again.',
+  'alerts.state.on': 'Alerts are on for this phone.',
+  'alerts.state.off': 'Alerts are off for this phone.',
 } as const;
 
 export type MessageKey = keyof typeof en;

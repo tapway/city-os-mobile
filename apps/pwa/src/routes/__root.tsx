@@ -7,6 +7,8 @@ import { useOfflineSync } from '../hooks/useOfflineSync';
 import { authNotice, syncNotice, otherUserNotice, photoDroppedNotice, lockedNotice, logoutWarning } from '../lib/offline-queue';
 import { useLang } from '../i18n/react';
 import { AppHeader } from './app-header';
+import { usePushLifecycle } from '../hooks/usePushLifecycle';
+import { disableDeviceAlerts } from '../lib/push-api';
 
 const NAV_ITEM_STYLE = {
   display: 'flex',
@@ -35,12 +37,21 @@ export function RootLayout() {
   const photoNotice = photoDroppedNotice(lastResult);
   const lockNotice = lockedNotice(lastResult);
   const showCreate = canCreateTickets(getSessionUser()?.roles);
+  usePushLifecycle();
 
-  const signOut = () => {
+  const signOut = async () => {
     // Pending updates stay on the device, held until their author signs in again.
     const warning = logoutWarning(pending);
     if (warning && !window.confirm(tm(warning))) return;
-    void logout();
+    // A shared handset must stop receiving the departing officer's alerts before
+    // the session is cleared (the unsubscribe call needs the access token).
+    await Promise.race([
+      disableDeviceAlerts(),
+      // A shared handset must not stay signed in because the network stalled:
+      // the local subscription is already gone, so log out after a short wait.
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]).catch(() => undefined);
+    await logout();
   };
   const isLogin = location.pathname === '/login';
   const isActive = (path: string) =>
