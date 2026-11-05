@@ -1,0 +1,29 @@
+name: branch-policy
+
+# Trunk protection: feature branches may only merge into `staging`.
+# `staging` -> trunk promotions are opened by anyone and require the
+# Release Approvers team (org ruleset `trunk-policy`).
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: staging-only
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require staging as source branch
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          echo "PR source: ${HEAD_REF} -> ${BASE_REF}"
+          if [ "${HEAD_REF}" != "staging" ]; then
+            echo "::error::Merges into ${BASE_REF} are prohibited from '${HEAD_REF}'. Merge into 'staging' first, then open a staging -> ${BASE_REF} PR."
+            exit 1
+          fi
+          echo "OK: staging promotion."
