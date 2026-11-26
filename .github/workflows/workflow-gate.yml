@@ -2,7 +2,13 @@ name: workflow-gate
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
 
 jobs:
   contracts:
     uses: tapway/tapway-superpowers/.github/workflows/workflow-gate.yml@master
+    with:
+      enforce_docs_impact: true
