@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Tailwind v4 only scans this package by default. Button and Badge live in
+   packages/ui, so without this their utility classes (h-11, bg-[var(--cyan)],
+   rounded-sm ...) never reach the build and every CTA renders as bare text. */
+@source "../../../packages/ui/src";
+
 /* ═══════════════════════════════════════════════════════════════
  * Terra HUD Theme — dark glass-morphism design system
  * Matches the City Help console aesthetic (PR #31 Terra theme)
@@ -19,8 +24,8 @@
 
   /* Text */
   --ink: #e2e8f0;
-  --ink-dim: #64748b;
-  --ink-faint: #475569;
+  --ink-dim: #94a3b8;
+  --ink-faint: #7c8aa0;
 
   /* Accents */
   --cyan: #3de8ff;
@@ -98,6 +103,78 @@ body::before {
   background: var(--bg-deep);
 }
 
+/* Top bar: one line from 360px up. The title gives way (ellipsis) before any
+   control wraps; the controls keep a 44px touch target. Below 440px Sign out is
+   icon-only (its text stays in the accessibility tree via aria-label + clip). */
+.topbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--glass);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(24px);
+}
+.topbar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-label);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.topbar > * {
+  flex-shrink: 0;
+}
+.topbar > .topbar-title {
+  flex-shrink: 1;
+}
+.topbar-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 10px;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--ink-dim);
+  cursor: pointer;
+  font-family: var(--font-label);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+@media (max-width: 439px) {
+  .signout-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .topbar-signout {
+    padding: 0;
+  }
+}
+@media (min-width: 440px) {
+  .topbar {
+    padding: 6px 16px;
+  }
+}
+
 /* Glass panel — the primary card pattern */
 .glass-panel {
   background: var(--glass);
@@ -138,7 +215,7 @@ body::before {
 /* HUD labels */
 .hud-label {
   font-family: var(--font-label);
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--ink-dim);
@@ -156,7 +233,7 @@ body::before {
 /* Button base (for custom buttons outside @city-os/ui) */
 .hud-btn {
   font-family: var(--font-label);
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   cursor: pointer;
@@ -174,6 +251,25 @@ body::before {
 .hud-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* Status filter chips: one scrolling row. The right edge fades out so a
+   clipped chip reads as "more this way", not as a broken label. */
+.chip-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+.chip-row::-webkit-scrollbar {
+  display: none;
+}
+.chip-row > :last-child {
+  margin-right: 24px;
 }
 
 /* Scrollbar styling */
@@ -194,6 +290,15 @@ body::before {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Keyboard focus must be visible. Every screen sets `outline: none` inline on its
+   inputs, and an inline declaration beats this rule — so those were removed
+   too, otherwise a keyboard user cannot tell where they are (WCAG 2.4.7). */
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 /* View transitions */
