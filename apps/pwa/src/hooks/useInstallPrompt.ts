@@ -11,7 +11,13 @@ export function useInstallPrompt() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
-  const [dismissed, setDismissed] = useState(() => localStorage.getItem(STORAGE_KEY) === 'true');
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     setIsIOS(/iP(ad|hone|od)/.test(navigator.userAgent));
@@ -37,7 +43,11 @@ export function useInstallPrompt() {
   };
 
   const dismiss = () => {
-    localStorage.setItem(STORAGE_KEY, 'true');
+    try {
+      localStorage.setItem(STORAGE_KEY, 'true');
+    } catch {
+      // blocked storage: dismissed for this session only
+    }
     setDismissed(true);
   };
 

@@ -1,0 +1,8 @@
+name: workflow-gate
+
+on:
+  pull_request:
+
+jobs:
+  contracts:
+    uses: tapway/tapway-superpowers/.github/workflows/workflow-gate.yml@master

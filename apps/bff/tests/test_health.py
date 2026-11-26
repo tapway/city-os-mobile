@@ -6,4 +6,9 @@ def test_health():
     client = TestClient(app)
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    assert body["status"] == "ok"
+    # The health payload also reports deployment-critical capability state so a
+    # smoke check can tell "running" from "running but storage is not wired up".
+    assert "uploads_enabled" in body
+    assert "pwa_origins" in body

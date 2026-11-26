@@ -87,3 +87,88 @@ Replace the light Tailwind colors (`bg-gray-50`, `text-gray-900`, `border-gray-2
 Start with **Phase 1 (Theme)** + **Phase 2 (Create Ticket)** — this gives the most visible impact. The theme makes the PWA look like part of the City OS ecosystem, and create-ticket closes the biggest functional gap (officers can't report incidents from the field).
 
 Do the PWA theme update first, then the ticket creation form, then the map, then offline/notifications. Each is a separate PR.
+
+---
+
+## 6. Resolution — field-officer readiness (2026-09-30)
+
+Superseding note: the phasing above assumed the PWA's own screens were the work.
+The actual blocker was underneath them.
+
+### What was wrong
+
+**The app was wired to an API contract that does not exist.** Ticket search,
+detail, status updates and attendance all called paths the City Help API does
+not serve (`/api/v1/tickets`, `/api/v1/tickets/{id}/comments`, and so on). Every
+screen therefore failed its first fetch. The real contract — `/api/v1/events`
+with `limit`/`offset`/`q`/`status`, `/api/v1/events/{uid}`, and
+`PATCH /api/v1/events/{uid}/status` — is now expressed once, in
+`apps/pwa/src/lib/help-api.ts`, and the screens import from it.
+
+**The session could not survive a reload.** Tokens lived only in a module
+variable, so a phone waking from sleep, or any refresh, silently signed the
+officer out: the API returned 401 and the UI showed an empty list. The BFF now
+exposes `/auth/refresh` against its HttpOnly refresh cookie, the app calls
+`bootstrapSession()` before deciding a user is signed out, and a 401 triggers a
+single-flight refresh-and-retry.
+
+**The Keycloak client could not mint a usable token.** `city-os-mobile` had
+neither the audience mapper nor the realm-roles mapper, so tokens carried no
+`aud` and no `realm_access.roles` — City Help rejects the first outright. The
+client now mirrors `city-help-web`'s mappers.
+
+**Browser login was impossible, for a reason outside this repo.** The `city-os`
+realm pins `attributes.frontendUrl` to `http://deploy-keycloak-1:8080`, the
+Docker container name. Keycloak renders that origin into the sign-in form's
+`action`, so the browser cannot resolve it and the form post dies with a network
+error. Every City OS app using the password grant is unaffected because it never
+follows a redirect; the PWA is the first to use the authorization-code flow and
+walks straight into it. Locally this is worked around by sending the browser to
+the same origin Keycloak renders (`KEYCLOAK_PUBLIC_URL`) and resolving that name
+to the host-mapped port (`pnpm e2e:keycloak-alias`). **A field deployment needs a
+platform decision** — either move the realm's `frontendUrl` to a
+browser-reachable origin (which changes the `iss` claim, so every validating
+service must move with it) or front Keycloak with a same-origin rewriting proxy.
+Recorded in `docs/testing.md`; not applied.
+
+### GPS on an update
+
+The requirement is that a ticket update locks the officer's position. The
+transition engine already stores latitude and longitude, but the status route
+never accepted them, so the app had nothing to send. The app now requires a fix
+taken within the last five minutes (`useGeolocation` tracks fix age and
+accuracy), sends it with the update, and refuses to submit without a fresh one.
+The route now accepts `lat`/`lng` as query parameters and forwards them to the
+engine, which writes the position into `ticket_attendance_logs` for the
+`IN_PROGRESS` transition.
+
+### Evidence images
+
+There was no upload path anywhere in the stack. The BFF now stores photos in the
+City OS object store (MinIO) under `mobile-attachments/` and serves them back,
+with the token verified upstream before anything is written. The status route now accepts `image_urls` and merges them onto the ticket, so
+evidence accumulates across updates. The merge is idempotent, so a retried
+update cannot duplicate a photo, and an update with no photos never clears the
+ones already there.
+
+### Defects found in review and fixed
+
+- **The proxy could be walked out of its prefix.** httpx normalises `../` after
+  the upstream URL is built, so with only a `Bearer ` check as a gate,
+  `GET /api/../openapi.json` returned City Help's 121 KB OpenAPI schema with a
+  junk token. Paths are validated segment by segment (encoded forms included)
+  before any upstream call.
+- **A Keycloak blip signed people out permanently.** Every refresh failure —
+  5xx, timeout, unreachable — was treated as a dead token and deleted the
+  cookie. Failures are classified now: a 4xx rejection clears it, anything
+  transient returns 503 and keeps it.
+- The OIDC error redirect is encoded rather than interpolated into a `Location`
+  header; the proxy has a deliberate 30s upstream timeout and a body-size cap;
+  the BFF carries a `.dockerignore` so `COPY . /app` no longer bakes `.env`
+  (object-store keys, OIDC client secret) into the image.
+
+### Verification
+
+Unit tests (`pnpm test` in `apps/pwa`: 7; `pytest` in `apps/bff`: 29) plus a
+Playwright suite that drives the real sign-in form and the real API, creating and
+updating its own ticket — see `docs/testing.md`.
