@@ -1,0 +1,10 @@
+# Requires a plan on every PR. Rules live in tapway-superpowers.
+name: workflow-audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  audit:
+    uses: tapway/tapway-superpowers/.github/workflows/workflow-audit.yml@master
